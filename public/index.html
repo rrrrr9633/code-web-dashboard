@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlowMQ 代码可视化分析器</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            min-width: 1400px;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            display: flex;
+            max-width: 1800px;
+            margin: 0 auto;
+            min-height: 100vh;
+            background: white;
+            box-shadow: 0 0 30px rgba(0,0,0,0.1);
+        }
+
+        .sidebar {
+            width: 380px;
+            min-width: 380px;
+            flex-shrink: 0;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-right: 3px solid #e9ecef;
+            overflow-y: auto;
+        }
+
+        .sidebar-header {
+            padding: 20px;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            text-align: center;
+        }
+
+        .sidebar-header h1 {
+            font-size: 1.5em;
+            margin-bottom: 10px;
+        }
+
+        .sidebar-header p {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+
+        .overview-cards {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 10px;
+            padding: 20px;
+            border-bottom: 2px solid #e9ecef;
+        }
+
+        .overview-card {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .overview-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.15);
+        }
+
+        .overview-card .number {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+
+        .overview-card .label {
+            color: #666;
+            font-size: 0.8em;
+        }
+
+        .tree-container {
+            padding: 15px;
+        }
+
+        .tree-item {
+            margin-bottom: 8px;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .tree-item:hover {
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        .tree-item[data-type="category"] {
+            border-left: 4px solid #667eea;
+            background: rgba(102, 126, 234, 0.05);
+            margin-bottom: 15px;
+            border-radius: 8px;
+        }
+
+        .tree-item[data-type="category"]:hover {
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        .tree-label {
+            display: flex;
+            align-items: center;
+            padding: 12px 15px;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .tree-label:hover {
+            background: rgba(102, 126, 234, 0.1);
+            transform: translateX(3px);
+        }
+
+        .tree-label i {
+            margin-right: 12px;
+            width: 20px;
+            text-align: center;
+        }
+
+        .folder-icon {
+            color: #f39c12;
+        }
+
+        .file-icon {
+            color: #3498db;
+        }
+
+        .children {
+            margin-left: 25px;
+            border-left: 2px solid #e9ecef;
+            padding-left: 15px;
+            display: none;
+        }
+
+        .children.open {
+            display: block;
+        }
+
+        .main-content {
+            flex: 1;
+            min-width: 900px;
+            display: flex;
+            flex-direction: column;
+            background: #f8f9fa;
+        }
+
+        .toolbar {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 20px 25px;
+            border-bottom: 2px solid #e9ecef;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+
+        .search-container {
+            flex: 0 0 300px;
+            position: relative;
+            margin-right: 20px;
+        }
+
+        .search-input {
+            width: 100%;
+            background: linear-gradient(45deg, #f1f3f4, #e8eaf6);
+            padding: 12px 50px 12px 18px;
+            border-radius: 25px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.9em;
+            color: #5f6368;
+            border: 2px solid #dadce0;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 15px rgba(102, 126, 234, 0.3);
+        }
+
+        .search-btn {
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .search-btn:hover {
+            transform: translateY(-50%) scale(1.05);
+        }
+
+        .file-path {
+            flex: 1;
+            background: linear-gradient(45deg, #f1f3f4, #e8eaf6);
+            padding: 12px 18px;
+            border-radius: 25px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.9em;
+            color: #5f6368;
+            border: 2px solid #dadce0;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .ai-buttons {
+            display: flex;
+            gap: 12px;
+        }
+
+        .ai-btn {
+            padding: 10px 18px;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 0.9em;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        .ai-btn.explain {
+            background: linear-gradient(45deg, #4CAF50, #66BB6A);
+            color: white;
+        }
+
+        .ai-btn.review {
+            background: linear-gradient(45deg, #ff9800, #FFB74D);
+            color: white;
+        }
+
+        .ai-btn.document {
+            background: linear-gradient(45deg, #2196F3, #42A5F5);
+            color: white;
+        }
+
+        .ai-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+        }
+
+        .ai-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .content-area {
+            flex: 1;
+            min-width: 800px;
+            display: flex;
+            overflow: hidden;
+        }
+
+        .code-panel {
+            flex: 1;
+            min-width: 600px;
+            overflow: auto;
+            background: white;
+        }
+
+        .ai-panel {
+            width: 450px;
+            min-width: 450px;
+            flex-shrink: 0;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-left: 3px solid #e9ecef;
+            overflow-y: auto;
+            transition: all 0.3s ease;
+            transform: translateX(100%);
+        }
+
+        .ai-panel.open {
+            transform: translateX(0);
+        }
+
+        .ai-panel-header {
+            padding: 20px;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            font-weight: 600;
+        }
+
+        .ai-panel-content {
+            padding: 20px;
+            line-height: 1.6;
+        }
+
+        .code-container {
+            padding: 20px;
+        }
+
+        .file-info {
+            background: linear-gradient(45deg, #e3f2fd, #f3e5f5);
+            padding: 20px 25px;
+            border-left: 4px solid #2196F3;
+            margin-bottom: 25px;
+            border-radius: 0 12px 12px 0;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        .file-info h3 {
+            color: #1976d2;
+            margin-bottom: 10px;
+            font-size: 1.2em;
+        }
+
+        .file-info p {
+            color: #424242;
+            margin: 6px 0;
+        }
+
+        pre {
+            background: #f8f9fa;
+            border: 2px solid #e9ecef;
+            border-radius: 12px;
+            overflow-x: auto;
+            margin: 0;
+            box-shadow: 0 6px 25px rgba(0,0,0,0.1);
+        }
+
+        code {
+            display: block;
+            padding: 25px;
+            line-height: 1.6;
+            font-size: 14px;
+            color: #333;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        }
+
+        .welcome {
+            text-align: center;
+            padding: 80px 40px;
+            color: #6c757d;
+            background: radial-gradient(circle, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
+        }
+
+        .welcome i {
+            font-size: 5em;
+            color: #667eea;
+            margin-bottom: 25px;
+            opacity: 0.7;
+        }
+
+        .welcome h2 {
+            margin-bottom: 20px;
+            color: #495057;
+            font-size: 2em;
+        }
+
+        .welcome p {
+            font-size: 1.1em;
+            margin-bottom: 15px;
+        }
+
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 60px;
+            color: #667eea;
+            font-size: 1.2em;
+        }
+
+        .loading i {
+            margin-right: 15px;
+            animation: spin 1s linear infinite;
+            font-size: 1.5em;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: linear-gradient(45deg, #f8d7da, #f5c6cb);
+            color: #721c24;
+            padding: 20px 25px;
+            border-radius: 10px;
+            border: 2px solid #f5c6cb;
+            margin: 25px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        .close-ai-panel {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: rgba(255,255,255,0.2);
+            border: none;
+            font-size: 1.2em;
+            cursor: pointer;
+            color: white;
+            padding: 8px;
+            border-radius: 50%;
+            transition: all 0.3s ease;
+        }
+
+        .close-ai-panel:hover {
+            background: rgba(255,255,255,0.3);
+            transform: scale(1.1);
+        }
+
+        /* 模块卡片样式增强 */
+        .module-card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+            backdrop-filter: blur(10px);
+        }
+
+        .module-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: var(--module-color);
+        }
+
+        .module-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
+        }
+
+        .search-results {
+            background: white;
+            border-radius: 12px;
+            margin: 20px;
+            padding: 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            display: none;
+        }
+
+        .search-result-item {
+            padding: 12px 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border-left: 4px solid #667eea;
+            background: rgba(102, 126, 234, 0.05);
+        }
+
+        .search-result-item:hover {
+            background: rgba(102, 126, 234, 0.1);
+            transform: translateX(3px);
+        }
+
+        .search-result-title {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .search-result-path {
+            font-size: 0.8em;
+            color: #666;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        }
+
+        .search-result-preview {
+            font-size: 0.9em;
+            color: #555;
+            margin-top: 8px;
+            padding: 8px;
+            background: rgba(255,255,255,0.7);
+            border-radius: 4px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .container {
+                flex-direction: column;
+            }
+            
+            .sidebar {
+                width: 100%;
+                max-height: 300px;
+            }
+            
+            .ai-panel {
+                width: 100%;
+                position: fixed;
+                top: 0;
+                left: 0;
+                height: 100vh;
+                z-index: 1000;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h1><i class="fas fa-code"></i> FlowMQ</h1>
+                <p>统一消息和流平台代码分析器</p>
+            </div>
+            
+            <div class="overview-cards" id="overview-cards">
+                <div class="overview-card">
+                    <div class="number" id="moduleCount">-</div>
+                    <div class="label">模块数量</div>
+                </div>
+                <div class="overview-card">
+                    <div class="number" id="fileCount">-</div>
+                    <div class="label">源文件</div>
+                </div>
+                <div class="overview-card">
+                    <div class="number" id="protocolCount">-</div>
+                    <div class="label">支持协议</div>
+                </div>
+            </div>
+            
+            <div class="tree-container" id="fileTree">
+                <div class="loading">
+                    <i class="fas fa-spinner"></i>
+                    正在加载项目结构...
+                </div>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="toolbar">
+                <div class="search-container" id="searchContainer">
+                    <input type="text" class="search-input" id="searchInput" placeholder="搜索文件名或内容..." onkeyup="handleSearch(event)">
+                    <button class="search-btn" onclick="performSearch()">
+                        <i class="fas fa-search"></i>
+                    </button>
+                </div>
+                
+                <div class="file-path" id="filePath">选择一个文件开始浏览</div>
+                
+                <div class="ai-buttons">
+                    <button class="ai-btn explain" onclick="analyzeCode('explain')" disabled>
+                        <i class="fas fa-lightbulb"></i> 代码解析
+                    </button>
+                    <button class="ai-btn review" onclick="analyzeCode('review')" disabled>
+                        <i class="fas fa-search"></i> 代码审查
+                    </button>
+                    <button class="ai-btn document" onclick="analyzeCode('document')" disabled>
+                        <i class="fas fa-file-alt"></i> 生成文档
+                    </button>
+                </div>
+            </div>
+
+            <div class="content-area">
+                <div class="code-panel">
+                    <div class="search-results" id="searchResults"></div>
+                    
+                    <div class="welcome" id="welcomeMessage">
+                        <i class="fas fa-rocket"></i>
+                        <h2>欢迎使用 FlowMQ 代码分析器</h2>
+                        <p>🎯 点击左侧分类浏览项目结构</p>
+                        <p>📁 选择文件查看代码内容</p>
+                        <p>🔍 使用搜索功能快速查找文件和内容</p>
+                        <p>🤖 使用AI功能进行智能分析</p>
+                        <p style="margin-top: 20px; font-size: 0.9em; opacity: 0.8;">
+                            支持 MQTT • AMQP • Kafka • HTTP API
+                        </p>
+                    </div>
+                    <div id="codeContent" style="display: none;"></div>
+                </div>
+
+                <div class="ai-panel" id="aiPanel">
+                    <div class="ai-panel-header">
+                        <button class="close-ai-panel" onclick="closeAiPanel()">
+                            <i class="fas fa-times"></i>
+                        </button>
+                        <i class="fas fa-robot"></i> AI 分析结果
+                    </div>
+                    <div class="ai-panel-content" id="aiContent"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
