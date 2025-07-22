@@ -944,6 +944,37 @@
             background: linear-gradient(45deg, #667eea, #764ba2);
             color: white;
             font-weight: 600;
+            cursor: move; /* 添加拖动光标 */
+            user-select: none; /* 禁止文本选择 */
+            position: relative;
+        }
+
+        /* 调整大小手柄样式 */
+        .resize-handle {
+            position: absolute;
+            right: 0;
+            bottom: 0;
+            width: 15px;
+            height: 15px;
+            background: transparent;
+            cursor: nwse-resize;
+        }
+
+        /* 确保面板可定位 */
+        .ai-panel {
+            position: absolute;
+            top: 80px;
+            right: 0;
+            height: calc(100vh - 80px);
+            max-height: none;
+            overflow: hidden;
+        }
+
+        .ai-panel-content {
+            height: calc(100% - 60px);
+            overflow-y: auto;
+            padding: 20px;
+            line-height: 1.6;
         }
 
         .ai-panel-content {
@@ -1306,13 +1337,12 @@
                 </div>
 
                 <div class="ai-panel" id="aiPanel">
-                    <div class="ai-panel-header">
-                        <button class="close-ai-panel" onclick="closeAiPanel()">
-                            <i class="fas fa-times"></i>
-                        </button>
+                    <div class="ai-panel-header" id="aiPanelHeader">
                         <i class="fas fa-robot"></i> AI 分析结果
                     </div>
-                    <div class="ai-panel-content" id="aiContent"></div>
+            <div class="ai-panel-content" id="aiContent">
+            </div>
+            <div class="resize-handle"></div></div>
                 </div>
             
         </div>

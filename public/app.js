@@ -1453,6 +1453,103 @@ function formatAnalysisResult(analysis) {
         .replace(/$/, '</p>');
 }
 
+// 初始化AI面板拖动功能
+function initAiPanelDraggable() {
+    const aiPanel = document.getElementById('aiPanel');
+    const header = document.getElementById('aiPanelHeader');
+    let isDragging = false;
+    let offsetX, offsetY;
+
+    header.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        // 计算鼠标相对于面板左上角的偏移量
+        offsetX = e.clientX - aiPanel.getBoundingClientRect().left;
+        offsetY = e.clientY - aiPanel.getBoundingClientRect().top;
+        header.style.cursor = 'grabbing';
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        // 计算新位置
+        const x = e.clientX - offsetX;
+        const y = e.clientY - offsetY;
+        // 设置面板位置
+        aiPanel.style.left = `${x}px`;
+        aiPanel.style.top = `${y}px`;
+        aiPanel.style.right = 'auto'; // 覆盖默认right定位
+        aiPanel.style.transform = 'none';
+        mouseMoveTimeout = null;
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (isDragging) {
+            isDragging = false;
+            header.style.cursor = 'move';
+        }
+    });
+}
+
+
+
+// ESC键控制显示/隐藏
+function setupEscKeyControl() {
+    const aiPanel = document.getElementById('aiPanel');
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            aiPanel.classList.toggle('open');
+            // 清除所有内联位置样式，确保CSS控制
+            aiPanel.style.left = '';
+            aiPanel.style.top = '';
+            aiPanel.style.right = '';
+            aiPanel.style.transform = '';
+        }
+    });
+}
+
+// 初始化AI面板调整大小功能
+function initAiPanelResizable() {
+    const aiPanel = document.getElementById('aiPanel');
+    const handle = aiPanel.querySelector('.resize-handle');
+    let isResizing = false;
+    let startX, startY, startWidth, startHeight;
+
+    handle.addEventListener('mousedown', (e) => {
+        isResizing = true;
+        // 记录初始位置和尺寸
+        startX = e.clientX;
+        startY = e.clientY;
+        startWidth = aiPanel.offsetWidth;
+        startHeight = aiPanel.offsetHeight;
+        aiPanel.style.transition = 'none'; // 禁用过渡动画
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isResizing) return;
+        // 计算新尺寸
+        const newWidth = Math.max(300, startWidth + (e.clientX - startX));
+        const newHeight = Math.max(400, startHeight + (e.clientY - startY));
+        // 设置新尺寸
+        aiPanel.style.width = `${newWidth}px`;
+        aiPanel.style.height = `${newHeight}px`;
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (isResizing) {
+            isResizing = false;
+            aiPanel.style.transition = 'all 0.3s ease'; // 恢复过渡动画
+        }
+    });
+}
+
+// 页面加载时初始化面板功能
+document.addEventListener('DOMContentLoaded', () => {
+    initAiPanelDraggable();
+    initAiPanelResizable();
+    setupEscKeyControl();
+});
+
 // 切换思考过程显示
 function toggleThinking() {
     const thinkingContent = document.getElementById('thinkingContent');
