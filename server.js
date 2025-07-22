@@ -3,23 +3,57 @@ const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
 const axios = require('axios');
+const os = require('os');
 
 const app = express();
 const PORT = 3000;
 
-// 项目根目录
-const PROJECT_ROOT = path.join(__dirname, '..');
-
-// 项目管理
-let projects = [
-    {
-        id: 'desktop',
-        name: '桌面',
-        path: PROJECT_ROOT,
-        description: '桌面代码项目示例',
-        createdAt: new Date().toISOString()
+// 智能检测项目根目录和默认项目
+function detectDefaultProject() {
+    const currentDir = path.resolve(__dirname);
+    const parentDir = path.dirname(currentDir);
+    const parentDirName = path.basename(parentDir);
+    
+    // 检测用户主目录和平台
+    const homeDir = os.homedir();
+    const platform = os.platform();
+    
+    // 生成合适的项目名称和描述
+    let projectName, projectPath, description;
+    
+    // 检查父目录是否是桌面目录
+    const isDesktop = parentDirName.toLowerCase().includes('desktop') || 
+                      parentDirName.includes('桌面') || 
+                      parentDir === path.join(homeDir, 'Desktop') ||
+                      parentDir === path.join(homeDir, '桌面');
+    
+    if (isDesktop) {
+        // 如果确实在桌面目录
+        projectName = platform === 'win32' ? 'Desktop' : 
+                     (parentDirName.includes('桌面') ? '桌面' : 'Desktop');
+        projectPath = parentDir;
+        description = `${projectName}目录代码项目 (${parentDir})`;
+    } else {
+        // 如果不在桌面目录，使用父目录名称
+        projectName = `${parentDirName}目录`;
+        projectPath = parentDir;
+        description = `${parentDirName}目录代码项目 (${parentDir})`;
     }
-];
+    
+    return {
+        id: 'default',
+        name: projectName,
+        path: projectPath,
+        description: description,
+        createdAt: new Date().toISOString()
+    };
+}
+
+// 项目根目录 - 使用智能检测
+const PROJECT_ROOT = detectDefaultProject().path;
+
+// 项目管理 - 使用智能检测的默认项目
+let projects = [detectDefaultProject()];
 
 // 项目重组配置存储
 let projectRestructureConfigs = new Map();
@@ -414,9 +448,9 @@ app.delete('/api/projects/:id', (req, res) => {
             return res.status(404).json({ error: '项目不存在' });
         }
         
-        // 不能删除默认的桌面项目
-        if (projectId === 'desktop') {
-            return res.status(400).json({ error: '不能删除默认项目"桌面"，它是系统的核心示例项目' });
+        // 不能删除默认项目
+        if (projectId === 'default') {
+            return res.status(400).json({ error: '不能删除默认项目，它是系统的核心示例项目' });
         }
         
         const removedProject = projects.splice(projectIndex, 1)[0];
@@ -444,9 +478,9 @@ app.put('/api/projects/:id', (req, res) => {
             return res.status(404).json({ error: '项目不存在' });
         }
         
-        // 不能重命名默认的桌面项目
-        if (projectId === 'desktop') {
-            return res.status(400).json({ error: '默认项目"桌面"不能重命名' });
+        // 不能重命名默认项目
+        if (projectId === 'default') {
+            return res.status(400).json({ error: '默认项目不能重命名' });
         }
         
         // 检查名称是否重复
@@ -492,8 +526,8 @@ app.get('/api/structure', (req, res) => {
     const projectRoot = getProjectRoot(projectId);
     
     let structure;
-    if (projectId === 'desktop' || !projectId) {
-      // 桌面项目使用特殊的分类结构
+    if (projectId === 'default' || !projectId) {
+      // 默认项目使用特殊的分类结构
       structure = getDirectoryStructure(projectRoot);
     } else {
       // 其他项目使用简单的文件树结构
@@ -840,7 +874,7 @@ app.post('/api/analyze-project', requireAuth, async (req, res) => {
         }
         
         // 不能分析默认项目
-        if (projectId === 'desktop') {
+        if (projectId === 'default') {
             return res.status(400).json({ error: '默认项目不支持AI分析' });
         }
         

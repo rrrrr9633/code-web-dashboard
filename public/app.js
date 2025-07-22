@@ -57,10 +57,10 @@ async function loadProjects() {
         } else {
             // 如果后端还没有项目管理API，初始化默认项目
             projects = [{
-                id: 'desktop',
-                name: '桌面',
-                path: './桌面项目',
-                description: '桌面代码项目示例'
+                id: 'default',
+                name: '默认项目',
+                path: './默认项目',
+                description: '默认代码项目示例'
             }];
         }
         renderProjectList();
@@ -133,7 +133,7 @@ async function loadProjectStructure(project = null) {
         const structure = await response.json();
         
         // 检查是否有重组配置
-        if (project && project.id !== 'desktop') {
+        if (project && project.id !== 'default') {
             await checkRestructureStatus(project.id);
         }
         
@@ -193,12 +193,12 @@ function updateProjectRestructureStatus(projectId, hasRestructure) {
 // 更新概览卡片
 function updateOverviewCards(structure) {
     // 只统计非默认项目
-    let projectCount = projects.filter(p => p.id !== 'desktop').length;
+    let projectCount = projects.filter(p => p.id !== 'default').length;
     let moduleCount = 0;
     let fileCount = 0;
     
     // 如果当前项目是默认项目，不计算其文件和模块数量
-    if (currentProject && currentProject.id !== 'desktop') {
+    if (currentProject && currentProject.id !== 'default') {
         function countItems(items) {
             items.forEach(item => {
                 if (item.type === 'category') {
@@ -803,9 +803,9 @@ async function renameProject(projectId) {
         return;
     }
     
-    // 不能重命名默认的桌面项目
-    if (projectId === 'desktop') {
-        showNotification('默认项目"桌面"不能重命名', 'warning');
+    // 不能重命名默认项目
+    if (projectId === 'default') {
+        showNotification('默认项目不能重命名', 'warning');
         return;
     }
     
@@ -1167,7 +1167,7 @@ async function analyzeProject() {
     }
 
     // 检查是否是默认项目
-    if (currentProject.id === 'desktop') {
+    if (currentProject.id === 'default') {
         showNotification('默认项目不支持AI分析，请添加其他项目进行分析', 'warning');
         return;
     }
