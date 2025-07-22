@@ -132,6 +132,11 @@ async function loadProjectStructure(project = null) {
         const response = await fetch(url);
         const structure = await response.json();
         
+        // 检查是否有重组配置
+        if (project && project.id !== 'desktop') {
+            await checkRestructureStatus(project.id);
+        }
+        
         // 更新概览卡片
         updateOverviewCards(structure);
         
@@ -146,6 +151,43 @@ async function loadProjectStructure(project = null) {
             </div>
         `;
     }
+}
+
+// 检查重组状态
+async function checkRestructureStatus(projectId) {
+    try {
+        const response = await fetch(`/api/projects/${projectId}/restructure`);
+        const data = await response.json();
+        
+        // 更新项目列表中的状态指示器
+        updateProjectRestructureStatus(projectId, data.hasConfig);
+        
+    } catch (error) {
+        console.error('检查重组状态失败:', error);
+    }
+}
+
+// 更新项目重组状态显示
+function updateProjectRestructureStatus(projectId, hasRestructure) {
+    const projectItems = document.querySelectorAll('.project-item');
+    projectItems.forEach(item => {
+        const projectIdFromOnclick = item.getAttribute('onclick');
+        if (projectIdFromOnclick && projectIdFromOnclick.includes(`'${projectId}'`)) {
+            let statusIndicator = item.querySelector('.restructure-status');
+            if (hasRestructure) {
+                if (!statusIndicator) {
+                    statusIndicator = document.createElement('span');
+                    statusIndicator.className = 'restructure-status';
+                    statusIndicator.innerHTML = '<i class="fas fa-magic" title="已应用目录重组"></i>';
+                    item.querySelector('.project-info').appendChild(statusIndicator);
+                }
+            } else {
+                if (statusIndicator) {
+                    statusIndicator.remove();
+                }
+            }
+        }
+    });
 }
 
 // 更新概览卡片
@@ -1131,74 +1173,200 @@ async function analyzeProject() {
     }
 
     try {
-        showNotification('正在分析项目，请稍候...', 'info');
+        // 首先检查是否已有分析结果
+        const existingConfigResponse = await fetch(`/api/projects/${currentProject.id}/restructure`);
+        const existingConfig = await existingConfigResponse.json();
         
-        const sessionToken = localStorage.getItem('ai_session_token');
-        const response = await fetch('/api/analyze-project', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${sessionToken}`
-            },
-            body: JSON.stringify({ 
-                projectId: currentProject.id
-            })
-        });
-
-        if (response.ok) {
-            const result = await response.json();
-            
-            // 显示AI面板
-            const aiPanel = document.getElementById('aiPanel');
-            const aiContent = document.getElementById('aiContent');
-            
-            let displayContent = `<div class="analysis-result">
-                <h3><i class="fas fa-project-diagram"></i> 项目分析报告</h3>`;
-            
-            // 如果有思考过程，添加可展开的思考部分
-            if (result.hasThinking && result.thinking) {
-                displayContent += `
-                    <div class="thinking-section">
-                        <div class="thinking-header" onclick="toggleThinking()">
-                            <i class="fas fa-brain"></i>
-                            <span>AI思考过程</span>
-                            <i class="fas fa-chevron-down thinking-toggle"></i>
-                        </div>
-                        <div class="thinking-content" id="thinkingContent" style="display: none;">
-                            ${formatAnalysisResult(result.thinking)}
-                        </div>
-                    </div>
-                `;
+        if (existingConfig.hasConfig) {
+            // 已有分析结果，询问用户是否重新分析
+            const shouldReanalyze = await showAnalysisOptionsDialog(existingConfig.config);
+            if (!shouldReanalyze) {
+                // 用户选择使用现有配置，显示现有的分析结果
+                showExistingAnalysisResult(existingConfig.config);
+                return;
             }
-            
-            displayContent += `
-                <div class="analysis-content">${formatAnalysisResult(result.analysis)}</div>`;
-            
-            // 如果有结构映射，添加重组按钮
-            if (result.structureMapping) {
-                displayContent += `
-                    <div class="restructure-section">
-                        <button class="restructure-btn" onclick="applyProjectRestructure('${result.project.id}', '${encodeURIComponent(JSON.stringify(result.structureMapping))}')">
-                            <i class="fas fa-magic"></i> 应用目录重组
-                        </button>
-                    </div>
-                `;
-            }
-            
-            displayContent += `</div>`;
-            
-            aiContent.innerHTML = displayContent;
-            
-            aiPanel.classList.add('open');
-            showNotification('项目分析完成', 'success');
-        } else {
-            const error = await response.json();
-            console.error('项目分析错误:', error);
-            showNotification(error.error || '项目分析失败', 'error');
         }
+        
+        // 执行新的分析
+        await performNewAnalysis();
+        
     } catch (error) {
         console.error('项目分析失败:', error);
         showNotification('项目分析失败: ' + error.message, 'error');
+    }
+}
+
+// 显示分析选项对话框
+function showAnalysisOptionsDialog(existingConfig) {
+    return new Promise((resolve) => {
+        const savedDate = new Date(existingConfig.savedAt).toLocaleString('zh-CN');
+        
+        const modal = document.createElement('div');
+        modal.className = 'analysis-options-modal';
+        modal.innerHTML = `
+            <div class="modal-overlay" onclick="closeAnalysisOptionsDialog()"></div>
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3><i class="fas fa-history"></i> 发现已有分析结果</h3>
+                </div>
+                <div class="modal-body">
+                    <div class="existing-analysis-info">
+                        <p><strong>项目:</strong> ${existingConfig.projectName}</p>
+                        <p><strong>分析时间:</strong> ${savedDate}</p>
+                        <p><strong>状态:</strong> <span class="status-applied"><i class="fas fa-check"></i> 已应用重组配置</span></p>
+                    </div>
+                    <div class="options">
+                        <p>请选择您希望的操作：</p>
+                        <div class="option-buttons">
+                            <button class="option-btn use-existing" onclick="resolveAnalysisOptions(false)">
+                                <i class="fas fa-eye"></i>
+                                查看现有分析结果
+                            </button>
+                            <button class="option-btn reanalyze" onclick="resolveAnalysisOptions(true)">
+                                <i class="fas fa-refresh"></i>
+                                重新分析项目
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        // 存储resolve函数供按钮调用
+        window.currentAnalysisOptionsResolve = resolve;
+    });
+}
+
+// 关闭分析选项对话框
+function closeAnalysisOptionsDialog() {
+    const modal = document.querySelector('.analysis-options-modal');
+    if (modal) {
+        document.body.removeChild(modal);
+    }
+    if (window.currentAnalysisOptionsResolve) {
+        window.currentAnalysisOptionsResolve(false);
+        delete window.currentAnalysisOptionsResolve;
+    }
+}
+
+// 解析分析选项
+function resolveAnalysisOptions(shouldReanalyze) {
+    if (window.currentAnalysisOptionsResolve) {
+        window.currentAnalysisOptionsResolve(shouldReanalyze);
+        delete window.currentAnalysisOptionsResolve;
+    }
+    closeAnalysisOptionsDialog();
+}
+
+// 显示现有分析结果
+function showExistingAnalysisResult(config) {
+    const aiPanel = document.getElementById('aiPanel');
+    const aiContent = document.getElementById('aiContent');
+    
+    const savedDate = new Date(config.savedAt).toLocaleString('zh-CN');
+    
+    let displayContent = `<div class="analysis-result existing-result">
+        <h3><i class="fas fa-history"></i> 已保存的分析结果</h3>
+        <div class="existing-info">
+            <p><strong>分析时间:</strong> ${savedDate}</p>
+            <p><strong>状态:</strong> <span class="status-applied"><i class="fas fa-check"></i> 已应用重组配置</span></p>
+        </div>
+    `;
+    
+    // 如果有重组配置，显示重组和重置按钮
+    if (config.structureMapping) {
+        displayContent += `
+            <div class="restructure-section">
+                <p class="restructure-info">当前项目已应用AI重组配置，目录结构已优化。</p>
+                <button class="restructure-btn reset-btn" onclick="resetProjectRestructure('${currentProject.id}')">
+                    <i class="fas fa-undo"></i> 重置为原始结构
+                </button>
+                <button class="restructure-btn reanalyze-btn" onclick="analyzeProject()">
+                    <i class="fas fa-refresh"></i> 重新分析项目
+                </button>
+            </div>
+        `;
+    }
+    
+    displayContent += `</div>`;
+    
+    aiContent.innerHTML = displayContent;
+    aiPanel.classList.add('open');
+    
+    showNotification('已显示保存的分析结果', 'info');
+}
+
+// 执行新的分析
+async function performNewAnalysis() {
+    showNotification('正在分析项目，请稍候...', 'info');
+    
+    const sessionToken = localStorage.getItem('ai_session_token');
+    const response = await fetch('/api/analyze-project', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${sessionToken}`
+        },
+        body: JSON.stringify({ 
+            projectId: currentProject.id
+        })
+    });
+
+    if (response.ok) {
+        const result = await response.json();
+        
+        // 显示AI面板
+        const aiPanel = document.getElementById('aiPanel');
+        const aiContent = document.getElementById('aiContent');
+        
+        let displayContent = `<div class="analysis-result">
+            <h3><i class="fas fa-project-diagram"></i> 项目分析报告</h3>`;
+        
+        // 如果有思考过程，添加可展开的思考部分
+        if (result.hasThinking && result.thinking) {
+            displayContent += `
+                <div class="thinking-section">
+                    <div class="thinking-header" onclick="toggleThinking()">
+                        <i class="fas fa-brain"></i>
+                        <span>AI思考过程</span>
+                        <i class="fas fa-chevron-down thinking-toggle"></i>
+                    </div>
+                    <div class="thinking-content" id="thinkingContent" style="display: none;">
+                        ${formatAnalysisResult(result.thinking)}
+                    </div>
+                </div>
+            `;
+        }
+        
+        displayContent += `
+            <div class="analysis-content">${formatAnalysisResult(result.analysis)}</div>`;
+        
+        // 如果有结构映射，添加重组按钮
+        if (result.structureMapping) {
+            displayContent += `
+                <div class="restructure-section">
+                    <button class="restructure-btn" onclick="applyProjectRestructure('${result.project.id}', '${encodeURIComponent(JSON.stringify(result.structureMapping))}')">
+                        <i class="fas fa-magic"></i> 应用目录重组
+                    </button>
+                    <button class="restructure-btn reset-btn" onclick="resetProjectRestructure('${result.project.id}')">
+                        <i class="fas fa-undo"></i> 重置为原始结构
+                    </button>
+                </div>
+            `;
+        }
+        
+        displayContent += `</div>`;
+        
+        aiContent.innerHTML = displayContent;
+        
+        aiPanel.classList.add('open');
+        showNotification('项目分析完成', 'success');
+    } else {
+        const error = await response.json();
+        console.error('项目分析错误:', error);
+        showNotification(error.error || '项目分析失败', 'error');
     }
 }
 
@@ -1243,22 +1411,65 @@ async function applyProjectRestructure(projectId, encodedMapping) {
             return;
         }
         
-        // 获取原始项目结构
-        const response = await fetch(`/api/structure?project=${projectId}`);
-        const originalStructure = await response.json();
+        // 保存重组配置到服务器
+        const saveResponse = await fetch(`/api/projects/${projectId}/restructure`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ structureMapping })
+        });
         
-        // 应用分类重组
-        const categorizedStructure = categorizeProjectStructure(originalStructure, structureMapping);
+        if (!saveResponse.ok) {
+            throw new Error('保存重组配置失败');
+        }
         
-        // 更新显示
-        renderFileTree(categorizedStructure);
-        updateOverviewCards(categorizedStructure);
+        // 重新加载项目结构（现在会应用保存的重组配置）
+        await loadProjectStructure(project);
         
-        showNotification('目录重组已应用', 'success');
+        // 更新状态显示
+        updateProjectRestructureStatus(projectId, true);
+        
+        showNotification('目录重组已保存并应用', 'success');
         
     } catch (error) {
         console.error('应用目录重组失败:', error);
         showNotification('应用目录重组失败: ' + error.message, 'error');
+    }
+}
+
+// 重置项目重组配置
+async function resetProjectRestructure(projectId) {
+    if (!confirm('确定要重置为原始目录结构吗？这将删除所有保存的重组配置。')) {
+        return;
+    }
+    
+    try {
+        showNotification('正在重置目录结构...', 'info');
+        
+        // 删除服务器上的重组配置
+        const response = await fetch(`/api/projects/${projectId}/restructure`, {
+            method: 'DELETE'
+        });
+        
+        if (!response.ok) {
+            throw new Error('删除重组配置失败');
+        }
+        
+        // 重新加载项目结构
+        const project = projects.find(p => p.id === projectId);
+        if (project) {
+            await loadProjectStructure(project);
+        }
+        
+        // 更新状态显示
+        updateProjectRestructureStatus(projectId, false);
+        
+        showNotification('目录结构已重置为原始状态', 'success');
+        
+    } catch (error) {
+        console.error('重置目录结构失败:', error);
+        showNotification('重置目录结构失败: ' + error.message, 'error');
     }
 }
 

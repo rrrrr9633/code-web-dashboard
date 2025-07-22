@@ -21,6 +21,9 @@ let projects = [
     }
 ];
 
+// 项目重组配置存储
+let projectRestructureConfigs = new Map();
+
 // 中间件
 app.use(cors());
 app.use(express.json());
@@ -488,15 +491,22 @@ app.get('/api/structure', (req, res) => {
     const projectId = req.query.project;
     const projectRoot = getProjectRoot(projectId);
     
+    let structure;
     if (projectId === 'desktop' || !projectId) {
       // 桌面项目使用特殊的分类结构
-      const structure = getDirectoryStructure(projectRoot);
-      res.json(structure);
+      structure = getDirectoryStructure(projectRoot);
     } else {
       // 其他项目使用简单的文件树结构
-      const structure = getSimpleDirectoryStructure(projectRoot);
-      res.json(structure);
+      structure = getSimpleDirectoryStructure(projectRoot);
     }
+    
+    // 检查是否有保存的重组配置
+    if (projectId && projectRestructureConfigs.has(projectId)) {
+      const restructureConfig = projectRestructureConfigs.get(projectId);
+      structure = applyStructureReorganization(structure, restructureConfig);
+    }
+    
+    res.json(structure);
   } catch (error) {
     console.error('获取项目结构失败:', error);
     res.status(500).json({ error: '获取项目结构失败' });
@@ -555,6 +565,79 @@ app.get('/api/file/*', (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// 保存项目重组配置
+app.post('/api/projects/:projectId/restructure', (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { structureMapping } = req.body;
+    
+    if (!projectId || !structureMapping) {
+      return res.status(400).json({ error: '项目ID和重组配置不能为空' });
+    }
+    
+    // 验证项目是否存在
+    const project = projects.find(p => p.id === projectId);
+    if (!project) {
+      return res.status(404).json({ error: '项目不存在' });
+    }
+    
+    // 保存重组配置
+    projectRestructureConfigs.set(projectId, {
+      structureMapping,
+      savedAt: new Date().toISOString(),
+      projectName: project.name
+    });
+    
+    console.log(`项目 "${project.name}" 的重组配置已保存`);
+    res.json({ 
+      message: '重组配置已保存',
+      savedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('保存重组配置失败:', error);
+    res.status(500).json({ error: '保存重组配置失败' });
+  }
+});
+
+// 获取项目重组配置
+app.get('/api/projects/:projectId/restructure', (req, res) => {
+  try {
+    const { projectId } = req.params;
+    
+    if (projectRestructureConfigs.has(projectId)) {
+      const config = projectRestructureConfigs.get(projectId);
+      res.json({
+        hasConfig: true,
+        config: config
+      });
+    } else {
+      res.json({
+        hasConfig: false
+      });
+    }
+  } catch (error) {
+    console.error('获取重组配置失败:', error);
+    res.status(500).json({ error: '获取重组配置失败' });
+  }
+});
+
+// 删除项目重组配置
+app.delete('/api/projects/:projectId/restructure', (req, res) => {
+  try {
+    const { projectId } = req.params;
+    
+    if (projectRestructureConfigs.has(projectId)) {
+      projectRestructureConfigs.delete(projectId);
+      res.json({ message: '重组配置已删除' });
+    } else {
+      res.status(404).json({ error: '未找到重组配置' });
+    }
+  } catch (error) {
+    console.error('删除重组配置失败:', error);
+    res.status(500).json({ error: '删除重组配置失败' });
   }
 });
 
@@ -1194,6 +1277,86 @@ function isDocumentFile(filename) {
   return docExtensions.includes(ext) || 
          ['readme', 'license', 'changelog', 'authors', 'contributing', 'install'].some(doc => 
            name.includes(doc));
+}
+
+// 应用结构重组
+function applyStructureReorganization(structure, config) {
+  if (!config || !config.structureMapping || !config.structureMapping.categories) {
+    return structure;
+  }
+  
+  const mapping = config.structureMapping;
+  const categories = mapping.categories;
+  const categorizedStructure = [];
+  const uncategorized = [];
+  
+  // 为每个分类创建容器
+  Object.keys(categories).forEach(categoryName => {
+    const category = categories[categoryName];
+    const categoryContainer = {
+      name: categoryName,
+      type: 'category',
+      path: '',
+      description: category.description,
+      color: category.color,
+      children: []
+    };
+    
+    // 查找属于这个分类的目录
+    structure.forEach(item => {
+      if (item.type === 'directory') {
+        const itemPath = item.name + '/';
+        if (category.directories && category.directories.some(dir => 
+          dir === itemPath || 
+          itemPath.toLowerCase().includes(dir.toLowerCase().replace('/', '')) ||
+          dir.toLowerCase().replace('/', '').includes(item.name.toLowerCase())
+        )) {
+          categoryContainer.children.push(item);
+        }
+      }
+    });
+    
+    // 只有非空分类才添加
+    if (categoryContainer.children.length > 0) {
+      categorizedStructure.push(categoryContainer);
+    }
+  });
+  
+  // 添加未分类的项目
+  structure.forEach(item => {
+    let isCategorized = false;
+    
+    if (item.type === 'directory') {
+      const itemPath = item.name + '/';
+      Object.values(categories).forEach(category => {
+        if (category.directories && category.directories.some(dir => 
+          dir === itemPath || 
+          itemPath.toLowerCase().includes(dir.toLowerCase().replace('/', '')) ||
+          dir.toLowerCase().replace('/', '').includes(item.name.toLowerCase())
+        )) {
+          isCategorized = true;
+        }
+      });
+    }
+    
+    if (!isCategorized) {
+      uncategorized.push(item);
+    }
+  });
+  
+  // 如果有未分类的项目，添加到"其他"分类
+  if (uncategorized.length > 0) {
+    categorizedStructure.push({
+      name: '其他模块',
+      type: 'category',
+      path: '',
+      description: '未分类的模块和文件',
+      color: '#7f8c8d',
+      children: uncategorized
+    });
+  }
+  
+  return categorizedStructure;
 }
 
 app.listen(PORT, () => {
