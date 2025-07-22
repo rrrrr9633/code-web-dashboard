@@ -10,6 +10,17 @@ const PORT = 3000;
 // 项目根目录
 const PROJECT_ROOT = path.join(__dirname, '..');
 
+// 项目管理
+let projects = [
+    {
+        id: 'desktop',
+        name: '桌面',
+        path: PROJECT_ROOT,
+        description: '桌面代码项目示例',
+        createdAt: new Date().toISOString()
+    }
+];
+
 // 中间件
 app.use(cors());
 app.use(express.json());
@@ -185,11 +196,152 @@ const PROJECT_STRUCTURE = {
   }
 };
 
+// 项目管理API
+
+// 获取项目列表
+app.get('/api/projects', (req, res) => {
+    try {
+        res.json(projects);
+    } catch (error) {
+        console.error('获取项目列表失败:', error);
+        res.status(500).json({ error: '获取项目列表失败' });
+    }
+});
+
+// 添加新项目
+app.post('/api/projects', (req, res) => {
+    try {
+        const { name, path: projectPath } = req.body;
+        
+        if (!name || !projectPath) {
+            return res.status(400).json({ error: '项目名称和路径不能为空' });
+        }
+        
+        // 检查路径是否存在
+        if (!fs.existsSync(projectPath)) {
+            return res.status(400).json({ error: '指定的路径不存在' });
+        }
+        
+        // 检查是否已经存在同名项目
+        if (projects.some(p => p.name === name)) {
+            return res.status(400).json({ error: '项目名称已存在' });
+        }
+        
+        // 创建新项目
+        const newProject = {
+            id: generateProjectId(name),
+            name,
+            path: path.resolve(projectPath),
+            description: `${name} 项目`,
+            createdAt: new Date().toISOString()
+        };
+        
+        projects.push(newProject);
+        res.json(newProject);
+        
+        console.log(`项目 "${name}" 已添加:`, projectPath);
+    } catch (error) {
+        console.error('添加项目失败:', error);
+        res.status(500).json({ error: '添加项目失败' });
+    }
+});
+
+// 移除项目
+app.delete('/api/projects/:id', (req, res) => {
+    try {
+        const projectId = req.params.id;
+        const projectIndex = projects.findIndex(p => p.id === projectId);
+        
+        if (projectIndex === -1) {
+            return res.status(404).json({ error: '项目不存在' });
+        }
+        
+        // 不能删除默认的桌面项目
+        if (projectId === 'desktop') {
+            return res.status(400).json({ error: '不能删除默认项目"桌面"，它是系统的核心示例项目' });
+        }
+        
+        const removedProject = projects.splice(projectIndex, 1)[0];
+        res.json({ message: '项目已移除', project: removedProject });
+        
+        console.log(`项目 "${removedProject.name}" 已移除`);
+    } catch (error) {
+        console.error('移除项目失败:', error);
+        res.status(500).json({ error: '移除项目失败' });
+    }
+});
+
+// 重命名项目
+app.put('/api/projects/:id', (req, res) => {
+    try {
+        const projectId = req.params.id;
+        const { name } = req.body;
+        
+        if (!name || !name.trim()) {
+            return res.status(400).json({ error: '项目名称不能为空' });
+        }
+        
+        const projectIndex = projects.findIndex(p => p.id === projectId);
+        if (projectIndex === -1) {
+            return res.status(404).json({ error: '项目不存在' });
+        }
+        
+        // 不能重命名默认的桌面项目
+        if (projectId === 'desktop') {
+            return res.status(400).json({ error: '默认项目"桌面"不能重命名' });
+        }
+        
+        // 检查名称是否重复
+        const nameExists = projects.some(p => p.name === name.trim() && p.id !== projectId);
+        if (nameExists) {
+            return res.status(400).json({ error: '项目名称已存在' });
+        }
+        
+        // 更新项目名称
+        projects[projectIndex].name = name.trim();
+        projects[projectIndex].updatedAt = new Date().toISOString();
+        
+        res.json(projects[projectIndex]);
+        
+        console.log(`项目 "${projectId}" 已重命名为 "${name.trim()}"`);
+    } catch (error) {
+        console.error('重命名项目失败:', error);
+        res.status(500).json({ error: '重命名项目失败' });
+    }
+});
+
+// 生成项目ID
+function generateProjectId(name) {
+    const timestamp = Date.now();
+    const randomStr = Math.random().toString(36).substring(2, 8);
+    return `${name.toLowerCase().replace(/[^a-z0-9]/g, '')}_${timestamp}_${randomStr}`;
+}
+
+// 获取指定项目的根目录
+function getProjectRoot(projectId) {
+    if (!projectId) return PROJECT_ROOT;
+    
+    const project = projects.find(p => p.id === projectId);
+    if (!project) return PROJECT_ROOT;
+    
+    return project.path;
+}
+
 // 获取项目结构
 app.get('/api/structure', (req, res) => {
   try {
-    const structure = getDirectoryStructure(PROJECT_ROOT);
-    res.json(structure);
+    const projectId = req.query.project;
+    const projectRoot = getProjectRoot(projectId);
+    
+    if (projectId === 'desktop' || !projectId) {
+      // 桌面项目使用特殊的分类结构
+      const structure = getDirectoryStructure(projectRoot);
+      res.json(structure);
+    } else {
+      // 其他项目使用简单的文件树结构
+      const structure = getSimpleDirectoryStructure(projectRoot);
+      res.json(structure);
+    }
   } catch (error) {
     console.error('获取项目结构失败:', error);
     res.status(500).json({ error: '获取项目结构失败' });
@@ -200,11 +352,14 @@ app.get('/api/structure', (req, res) => {
 app.get('/api/search', (req, res) => {
   try {
     const query = req.query.q;
+    const projectId = req.query.project;
+    
     if (!query) {
       return res.status(400).json({ error: '搜索关键词不能为空' });
     }
     
-    const results = searchFiles(PROJECT_ROOT, query);
+    const projectRoot = getProjectRoot(projectId);
+    const results = searchFiles(projectRoot, query);
     res.json(results);
   } catch (error) {
     console.error('搜索失败:', error);
@@ -215,10 +370,12 @@ app.get('/api/search', (req, res) => {
 // 获取文件内容
 app.get('/api/file/*', (req, res) => {
   try {
-    const filePath = path.join(PROJECT_ROOT, req.params[0]);
+    const projectId = req.query.project;
+    const projectRoot = getProjectRoot(projectId);
+    const filePath = path.join(projectRoot, req.params[0]);
     
     // 安全检查：确保文件在项目目录内
-    if (!filePath.startsWith(PROJECT_ROOT)) {
+    if (!filePath.startsWith(projectRoot)) {
       return res.status(403).json({ error: '访问被拒绝' });
     }
     
@@ -553,6 +710,71 @@ function getDirectoryStructure(dirPath, relativePath = '') {
   }
 }
 
+// 获取简单目录结构（用于非FlowMQ项目）
+function getSimpleDirectoryStructure(dirPath, relativePath = '') {
+  const items = [];
+  
+  try {
+    const entries = fs.readdirSync(dirPath);
+    
+    for (const entry of entries) {
+      const fullPath = path.join(dirPath, entry);
+      const relPath = path.join(relativePath, entry);
+      const stats = fs.statSync(fullPath);
+      
+      // 跳过隐藏文件和常见的忽略目录
+      if (entry.startsWith('.') || ['node_modules', 'build', 'dist', '__pycache__', 'target'].includes(entry)) {
+        continue;
+      }
+      
+      if (stats.isDirectory()) {
+        const dirItem = {
+          name: entry,
+          type: 'directory',
+          path: relPath,
+          children: getSimpleDirectoryStructure(fullPath, relPath)
+        };
+        items.push(dirItem);
+      } else {
+        // 只显示代码文件和文档文件
+        if (isCodeFile(entry) || isDocumentFile(entry)) {
+          items.push({
+            name: entry,
+            type: 'file',
+            path: relPath,
+            size: stats.size,
+            modified: stats.mtime,
+            extension: path.extname(entry)
+          });
+        }
+      }
+    }
+
+    // 排序：目录在前，然后按名称排序
+    return items.sort((a, b) => {
+      if (a.type !== b.type) {
+        return a.type === 'directory' ? -1 : 1;
+      }
+      return a.name.localeCompare(b.name);
+    });
+  } catch (error) {
+    console.error(`读取目录失败: ${dirPath}`, error);
+    return [];
+  }
+}
+
+// 检查是否为文档文件
+function isDocumentFile(filename) {
+  const docExtensions = ['.md', '.txt', '.rst', '.doc', '.docx', '.pdf', 
+                        '.readme', '.license', '.changelog', '.authors'];
+  const ext = path.extname(filename).toLowerCase();
+  const name = filename.toLowerCase();
+  
+  return docExtensions.includes(ext) || 
+         ['readme', 'license', 'changelog', 'authors', 'contributing', 'install'].some(doc => 
+           name.includes(doc));
+}
+
 app.listen(PORT, () => {
-  console.log(`FlowMQ代码查看器运行在 http://localhost:${PORT}`);
+  console.log(`代码可视化分析器运行在 http://localhost:${PORT}`);
 });

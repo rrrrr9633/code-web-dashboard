@@ -1,15 +1,98 @@
 let currentFile = null;
 let currentFileContent = null;
+let currentProject = null;
+let currentRenameProjectId = null;
+let projects = [];
 
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', function() {
-    loadProjectStructure();
+    loadProjects();
+    setupAddProjectForm();
+    setupRenameProjectForm();
 });
 
-// 加载项目结构
-async function loadProjectStructure() {
+// 加载项目列表
+async function loadProjects() {
     try {
-        const response = await fetch('/api/structure');
+        const response = await fetch('/api/projects');
+        if (response.ok) {
+            projects = await response.json();
+        } else {
+            // 如果后端还没有项目管理API，初始化默认项目
+            projects = [{
+                id: 'desktop',
+                name: '桌面',
+                path: './桌面项目',
+                description: '桌面代码项目示例'
+            }];
+        }
+        renderProjectList();
+        
+        // 加载第一个项目（如果有的话）
+        if (projects.length > 0) {
+            selectProject(projects[0].id);
+        }
+    } catch (error) {
+        console.error('加载项目列表失败:', error);
+        // 降级处理，加载默认项目结构
+        loadProjectStructure();
+    }
+}
+
+// 渲染项目列表
+function renderProjectList() {
+    const projectList = document.getElementById('projectList');
+    
+    if (projects.length === 0) {
+        projectList.innerHTML = `
+            <div class="empty-projects">
+                <i class="fas fa-folder-open" style="font-size: 2em; color: #ccc; margin-bottom: 10px;"></i>
+                <p style="color: #666; text-align: center;">暂无项目</p>
+                <p style="color: #999; font-size: 0.8em; text-align: center;">点击上方"添加项目"按钮开始</p>
+            </div>
+        `;
+        return;
+    }
+    
+    projectList.innerHTML = projects.map(project => `
+        <div class="project-item ${currentProject?.id === project.id ? 'active' : ''}" onclick="selectProject('${project.id}')">
+            <div class="project-info">
+                <i class="fas fa-folder"></i>
+                <div>
+                    <div class="project-name">${project.name}</div>
+                    <div class="project-path">${project.path}</div>
+                </div>
+            </div>
+            <div class="project-actions">
+                <button class="project-action-btn" onclick="event.stopPropagation(); refreshProject('${project.id}')" title="刷新">
+                    <i class="fas fa-sync"></i>
+                </button>
+                <button class="project-action-btn" onclick="event.stopPropagation(); renameProject('${project.id}')" title="重命名">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button class="project-action-btn" onclick="event.stopPropagation(); removeProject('${project.id}')" title="移除">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
+        </div>
+    `).join('');
+}
+
+// 选择项目
+async function selectProject(projectId) {
+    const project = projects.find(p => p.id === projectId);
+    if (!project) return;
+    
+    currentProject = project;
+    renderProjectList(); // 重新渲染以更新active状态
+    await loadProjectStructure(project);
+}
+
+// 加载项目结构
+async function loadProjectStructure(project = null) {
+    try {
+        const url = project ? `/api/structure?project=${project.id}` : '/api/structure';
+        const response = await fetch(url);
         const structure = await response.json();
         
         // 更新概览卡片
@@ -30,12 +113,9 @@ async function loadProjectStructure() {
 
 // 更新概览卡片
 function updateOverviewCards(structure) {
+    let projectCount = projects.length;
     let moduleCount = 0;
     let fileCount = 0;
-    let protocolCount = 0;
-    
-    // 统计协议实现模块
-    const protocolModules = ['amqp', 'mqtt', 'kafka', 'nats', 'sqs'];
     
     function countItems(items) {
         items.forEach(item => {
@@ -43,9 +123,6 @@ function updateOverviewCards(structure) {
                 countItems(item.children || []);
             } else if (item.type === 'directory') {
                 moduleCount++;
-                if (protocolModules.includes(item.name)) {
-                    protocolCount++;
-                }
                 countItems(item.children || []);
             } else if (item.type === 'file') {
                 fileCount++;
@@ -56,9 +133,9 @@ function updateOverviewCards(structure) {
     countItems(structure);
     
     // 更新显示
-    document.getElementById('moduleCount').textContent = moduleCount;
+    document.getElementById('projectCount').textContent = projectCount;
     document.getElementById('fileCount').textContent = fileCount;
-    document.getElementById('protocolCount').textContent = protocolCount;
+    document.getElementById('moduleCount').textContent = moduleCount;
 }
 
 // 渲染文件树
@@ -235,7 +312,8 @@ async function openFile(filePath) {
             </div>
         `;
 
-        const response = await fetch(`/api/file/${filePath}`);
+        const projectParam = currentProject ? `?project=${currentProject.id}` : '';
+        const response = await fetch(`/api/file/${filePath}${projectParam}`);
         const data = await response.json();
 
         if (!response.ok) {
@@ -245,7 +323,8 @@ async function openFile(filePath) {
         currentFileContent = data.content;
 
         // 更新文件路径显示
-        document.getElementById('filePath').textContent = filePath;
+        const displayPath = currentProject ? `${currentProject.name}/${filePath}` : filePath;
+        document.getElementById('filePath').textContent = displayPath;
 
         // 启用AI按钮
         const aiButtons = document.querySelectorAll('.ai-btn');
@@ -442,7 +521,8 @@ function handleSearch(event) {
 // 搜索文件
 async function searchFiles(query) {
     try {
-        const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+        const projectParam = currentProject ? `&project=${currentProject.id}` : '';
+        const response = await fetch(`/api/search?q=${encodeURIComponent(query)}${projectParam}`);
         const results = await response.json();
         
         displaySearchResults(results, query);
@@ -518,6 +598,285 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// 项目管理相关函数
+
+// 显示添加项目对话框
+function showAddProjectDialog() {
+    document.getElementById('addProjectModal').style.display = 'block';
+    document.getElementById('projectName').focus();
+}
+
+// 关闭添加项目对话框
+function closeAddProjectDialog() {
+    document.getElementById('addProjectModal').style.display = 'none';
+    document.getElementById('addProjectForm').reset();
+}
+
+// 设置添加项目表单
+function setupAddProjectForm() {
+    document.getElementById('addProjectForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const formData = new FormData(e.target);
+        const projectData = {
+            name: formData.get('projectName'),
+            path: formData.get('projectPath')
+        };
+        
+        try {
+            const response = await fetch('/api/projects', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(projectData)
+            });
+            
+            if (response.ok) {
+                const newProject = await response.json();
+                projects.push(newProject);
+                renderProjectList();
+                closeAddProjectDialog();
+                
+                // 自动选择新添加的项目
+                selectProject(newProject.id);
+                
+                // 显示成功消息
+                showNotification('项目添加成功！', 'success');
+            } else {
+                const error = await response.json();
+                throw new Error(error.message || '添加项目失败');
+            }
+        } catch (error) {
+            console.error('添加项目失败:', error);
+            showNotification('添加项目失败: ' + error.message, 'error');
+        }
+    });
+    
+    // 点击模态框外部关闭
+    document.getElementById('addProjectModal').addEventListener('click', function(e) {
+        if (e.target === this) {
+            closeAddProjectDialog();
+        }
+    });
+}
+
+// 刷新项目
+async function refreshProject(projectId) {
+    if (currentProject?.id === projectId) {
+        await loadProjectStructure(currentProject);
+        showNotification('项目已刷新', 'success');
+    }
+}
+
+// 重命名项目
+async function renameProject(projectId) {
+    const project = projects.find(p => p.id === projectId);
+    if (!project) {
+        showNotification('项目不存在', 'error');
+        return;
+    }
+    
+    // 不能重命名默认的桌面项目
+    if (projectId === 'desktop') {
+        showNotification('默认项目"桌面"不能重命名', 'warning');
+        return;
+    }
+    
+    currentRenameProjectId = projectId;
+    document.getElementById('newProjectName').value = project.name;
+    document.getElementById('renameProjectModal').style.display = 'block';
+    document.getElementById('newProjectName').focus();
+    document.getElementById('newProjectName').select();
+}
+
+// 关闭重命名项目对话框
+function closeRenameProjectDialog() {
+    document.getElementById('renameProjectModal').style.display = 'none';
+    document.getElementById('renameProjectForm').reset();
+    currentRenameProjectId = null;
+}
+
+// 设置重命名项目表单
+function setupRenameProjectForm() {
+    document.getElementById('renameProjectForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        if (!currentRenameProjectId) {
+            return;
+        }
+        
+        const formData = new FormData(e.target);
+        const newName = formData.get('newProjectName').trim();
+        
+        if (!newName) {
+            showNotification('项目名称不能为空', 'error');
+            return;
+        }
+        
+        // 检查名称是否重复
+        if (projects.some(p => p.name === newName && p.id !== currentRenameProjectId)) {
+            showNotification('项目名称已存在', 'error');
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/projects/${currentRenameProjectId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ name: newName })
+            });
+            
+            if (response.ok) {
+                const updatedProject = await response.json();
+                
+                // 更新本地项目列表
+                const projectIndex = projects.findIndex(p => p.id === currentRenameProjectId);
+                if (projectIndex !== -1) {
+                    projects[projectIndex] = updatedProject;
+                }
+                
+                // 更新当前项目信息
+                if (currentProject?.id === currentRenameProjectId) {
+                    currentProject = updatedProject;
+                }
+                
+                renderProjectList();
+                closeRenameProjectDialog();
+                
+                showNotification('项目重命名成功！', 'success');
+            } else {
+                const errorData = await response.json();
+                throw new Error(errorData.error || '重命名项目失败');
+            }
+        } catch (error) {
+            console.error('重命名项目失败:', error);
+            showNotification('重命名项目失败: ' + error.message, 'error');
+        }
+    });
+    
+    // 点击模态框外部关闭
+    document.getElementById('renameProjectModal').addEventListener('click', function(e) {
+        if (e.target === this) {
+            closeRenameProjectDialog();
+        }
+    });
+}
+
+// 移除项目
+async function removeProject(projectId) {
+    if (!confirm('确定要移除这个项目吗？')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/projects/${projectId}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            projects = projects.filter(p => p.id !== projectId);
+            renderProjectList();
+            
+            // 如果移除的是当前项目，清空内容
+            if (currentProject?.id === projectId) {
+                currentProject = null;
+                document.getElementById('fileTree').innerHTML = `
+                    <div class="welcome" style="text-align: center; padding: 20px;">
+                        <i class="fas fa-folder-open" style="font-size: 2em; color: #ccc; margin-bottom: 10px;"></i>
+                        <p style="color: #666;">请选择一个项目开始分析</p>
+                    </div>
+                `;
+                
+                // 重置概览卡片
+                document.getElementById('projectCount').textContent = projects.length;
+                document.getElementById('fileCount').textContent = '-';
+                document.getElementById('moduleCount').textContent = '-';
+            }
+            
+            // 如果还有其他项目，选择第一个
+            if (projects.length > 0 && (!currentProject || currentProject.id === projectId)) {
+                selectProject(projects[0].id);
+            }
+            
+            showNotification('项目已移除', 'success');
+        } else {
+            const errorData = await response.json();
+            throw new Error(errorData.error || '移除项目失败');
+        }
+    } catch (error) {
+        console.error('移除项目失败:', error);
+        showNotification('移除项目失败: ' + error.message, 'error');
+    }
+}
+
+// 显示通知
+function showNotification(message, type = 'info') {
+    // 创建通知元素
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${type}`;
+    notification.innerHTML = `
+        <i class="fas fa-${getNotificationIcon(type)}"></i>
+        <span>${message}</span>
+    `;
+    
+    // 添加样式
+    notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: ${getNotificationColor(type)};
+        color: white;
+        padding: 12px 20px;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        z-index: 10000;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.9em;
+        transform: translateX(100%);
+        transition: transform 0.3s ease;
+    `;
+    
+    document.body.appendChild(notification);
+    
+    // 动画显示
+    setTimeout(() => {
+        notification.style.transform = 'translateX(0)';
+    }, 100);
+    
+    // 自动隐藏
+    setTimeout(() => {
+        notification.style.transform = 'translateX(100%)';
+        setTimeout(() => {
+            document.body.removeChild(notification);
+        }, 300);
+    }, 3000);
+}
+
+// 获取通知图标
+function getNotificationIcon(type) {
+    switch (type) {
+        case 'success': return 'check-circle';
+        case 'error': return 'exclamation-circle';
+        case 'warning': return 'exclamation-triangle';
+        default: return 'info-circle';
+    }
+}
+
+// 获取通知颜色
+function getNotificationColor(type) {
+    switch (type) {
+        case 'success': return '#4CAF50';
+        case 'error': return '#f44336';
+        case 'warning': return '#ff9800';
+        default: return '#2196F3';
+    }
 }
 
 // 初始化highlight.js

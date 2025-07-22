@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FlowMQ 代码可视化分析器</title>
+    <title>代码可视化分析器</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
@@ -92,6 +92,247 @@
         .overview-card .label {
             color: #666;
             font-size: 0.8em;
+        }
+
+        .project-manager {
+            padding: 20px;
+            border-bottom: 2px solid #e9ecef;
+        }
+
+        .project-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .project-header h3 {
+            margin: 0;
+            color: #2c3e50;
+            font-size: 1.1em;
+        }
+
+        .project-header h3 i {
+            margin-right: 8px;
+            color: #667eea;
+        }
+
+        .add-project-btn {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 0.85em;
+            transition: all 0.3s ease;
+            box-shadow: 0 3px 8px rgba(102, 126, 234, 0.3);
+        }
+
+        .add-project-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .add-project-btn i {
+            margin-right: 5px;
+        }
+
+        .project-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .project-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            background: rgba(255, 255, 255, 0.8);
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .project-item:hover {
+            background: rgba(102, 126, 234, 0.05);
+            border-color: #667eea;
+            transform: translateX(3px);
+        }
+
+        .project-item.active {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border-color: #667eea;
+        }
+
+        .project-info {
+            display: flex;
+            align-items: center;
+            flex: 1;
+        }
+
+        .project-info i {
+            margin-right: 10px;
+            color: #667eea;
+        }
+
+        .project-item.active .project-info i {
+            color: white;
+        }
+
+        .project-name {
+            font-weight: 500;
+            margin-bottom: 2px;
+        }
+
+        .project-path {
+            font-size: 0.75em;
+            opacity: 0.7;
+        }
+
+        .project-actions {
+            display: flex;
+            gap: 5px;
+        }
+
+        .project-action-btn {
+            background: none;
+            border: none;
+            padding: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+            color: #666;
+            transition: all 0.3s ease;
+        }
+
+        .project-action-btn:hover {
+            background: rgba(102, 126, 234, 0.1);
+            color: #667eea;
+        }
+
+        .project-item.active .project-action-btn {
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .project-item.active .project-action-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+        }
+
+        /* 添加项目对话框样式 */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(5px);
+        }
+
+        .modal-content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            min-width: 400px;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #e9ecef;
+            padding-bottom: 15px;
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            color: #2c3e50;
+        }
+
+        .close-modal {
+            background: none;
+            border: none;
+            font-size: 1.5em;
+            cursor: pointer;
+            color: #666;
+            transition: color 0.3s ease;
+        }
+
+        .close-modal:hover {
+            color: #e74c3c;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #2c3e50;
+            font-weight: 500;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 0.9em;
+            transition: border-color 0.3s ease;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #f8f9fa;
+            color: #666;
+            border: 1px solid #e9ecef;
+        }
+
+        .btn-secondary:hover {
+            background: #e9ecef;
         }
 
         .tree-container {
@@ -535,22 +776,34 @@
     <div class="container">
         <div class="sidebar">
             <div class="sidebar-header">
-                <h1><i class="fas fa-code"></i> FlowMQ</h1>
-                <p>统一消息和流平台代码分析器</p>
+                <h1><i class="fas fa-code"></i> 代码分析器</h1>
+                <p>智能代码可视化分析平台</p>
             </div>
             
             <div class="overview-cards" id="overview-cards">
                 <div class="overview-card">
-                    <div class="number" id="moduleCount">-</div>
-                    <div class="label">模块数量</div>
+                    <div class="number" id="projectCount">-</div>
+                    <div class="label">项目数量</div>
                 </div>
                 <div class="overview-card">
                     <div class="number" id="fileCount">-</div>
                     <div class="label">源文件</div>
                 </div>
                 <div class="overview-card">
-                    <div class="number" id="protocolCount">-</div>
-                    <div class="label">支持协议</div>
+                    <div class="number" id="moduleCount">-</div>
+                    <div class="label">模块数量</div>
+                </div>
+            </div>
+            
+            <div class="project-manager">
+                <div class="project-header">
+                    <h3><i class="fas fa-folder-open"></i> 项目管理</h3>
+                    <button class="add-project-btn" onclick="showAddProjectDialog()">
+                        <i class="fas fa-plus"></i> 添加项目
+                    </button>
+                </div>
+                <div class="project-list" id="projectList">
+                    <!-- 项目列表将在这里动态生成 -->
                 </div>
             </div>
             
@@ -592,13 +845,14 @@
                     
                     <div class="welcome" id="welcomeMessage">
                         <i class="fas fa-rocket"></i>
-                        <h2>欢迎使用 FlowMQ 代码分析器</h2>
-                        <p>🎯 点击左侧分类浏览项目结构</p>
+                        <h2>欢迎使用代码可视化分析器</h2>
+                        <p>🎯 点击左侧项目浏览代码结构</p>
                         <p>📁 选择文件查看代码内容</p>
                         <p>🔍 使用搜索功能快速查找文件和内容</p>
                         <p>🤖 使用AI功能进行智能分析</p>
+                        <p>➕ 添加本地项目目录进行分析</p>
                         <p style="margin-top: 20px; font-size: 0.9em; opacity: 0.8;">
-                            支持 MQTT • AMQP • Kafka • HTTP API
+                            支持多种编程语言 • 智能代码分析 • 项目可视化
                         </p>
                     </div>
                     <div id="codeContent" style="display: none;"></div>
@@ -614,6 +868,54 @@
                     <div class="ai-panel-content" id="aiContent"></div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- 添加项目模态框 -->
+    <div id="addProjectModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-folder-plus"></i> 添加项目</h3>
+                <button class="close-modal" onclick="closeAddProjectDialog()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="addProjectForm">
+                <div class="form-group">
+                    <label for="projectName">项目名称:</label>
+                    <input type="text" id="projectName" name="projectName" placeholder="输入项目名称" required>
+                </div>
+                <div class="form-group">
+                    <label for="projectPath">项目路径:</label>
+                    <input type="text" id="projectPath" name="projectPath" placeholder="/path/to/your/project" required>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeAddProjectDialog()">取消</button>
+                    <button type="submit" class="btn btn-primary">添加项目</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 重命名项目模态框 -->
+    <div id="renameProjectModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-edit"></i> 重命名项目</h3>
+                <button class="close-modal" onclick="closeRenameProjectDialog()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="renameProjectForm">
+                <div class="form-group">
+                    <label for="newProjectName">新项目名称:</label>
+                    <input type="text" id="newProjectName" name="newProjectName" placeholder="输入新的项目名称" required>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeRenameProjectDialog()">取消</button>
+                    <button type="submit" class="btn btn-primary">重命名</button>
+                </div>
+            </form>
         </div>
     </div>
 
