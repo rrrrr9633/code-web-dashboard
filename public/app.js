@@ -1038,6 +1038,78 @@ function openAIConfigModal() {
     
     // 加载当前配置
     loadCurrentAIConfig();
+    
+    // 初始化拖动功能
+    initModalDrag(modal);
+    // 初始化调整大小功能
+    initModalResize(modal);
+}
+
+function initModalDrag(modal) {
+    const header = modal.querySelector('.modal-header');
+    let isDragging = false;
+    let offsetX, offsetY;
+
+    header.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        const modalContent = modal.querySelector('.modal-content');
+        const rect = modalContent.getBoundingClientRect();
+        offsetX = e.clientX - rect.left;
+        offsetY = e.clientY - rect.top;
+        header.style.cursor = 'grabbing';
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const modalContent = modal.querySelector('.modal-content');
+        modalContent.style.left = (e.clientX - offsetX) + 'px';
+        modalContent.style.top = (e.clientY - offsetY) + 'px';
+        modalContent.style.transform = 'none';
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (isDragging) {
+            isDragging = false;
+            header.style.cursor = 'move';
+        }
+    });
+}
+
+function initModalResize(modal) {
+    const handle = modal.querySelector('.resize-handle');
+    let isResizing = false;
+    let startX, startY, startWidth, startHeight;
+
+    handle.addEventListener('mousedown', (e) => {
+        isResizing = true;
+        const modalContent = modal.querySelector('.modal-content');
+        startWidth = parseInt(window.getComputedStyle(modalContent).width);
+        startHeight = parseInt(window.getComputedStyle(modalContent).height);
+        startX = e.clientX;
+        startY = e.clientY;
+        handle.style.cursor = 'grabbing';
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isResizing) return;
+        const modalContent = modal.querySelector('.modal-content');
+        const newWidth = startWidth + (e.clientX - startX);
+        const newHeight = startHeight + (e.clientY - startY);
+        
+        // 设置最小尺寸限制
+        if (newWidth > 400 && newHeight > 300) {
+            modalContent.style.width = newWidth + 'px';
+            modalContent.style.height = newHeight + 'px';
+        }
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (isResizing) {
+            isResizing = false;
+            handle.style.cursor = 'se-resize';
+        }
+    });
 }
 
 function closeAIConfigModal() {
