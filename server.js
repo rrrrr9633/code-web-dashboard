@@ -26,9 +26,53 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// DeepSeek API配置
-const DEEPSEEK_API_KEY = 'sk-f26b5f11db6048ae8b6bbfbb30cee1fd';
-const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
+// 登录页面路由
+app.get('/login.html', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+// 主页路由
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// AI配置管理 - 移除硬编码密钥
+let userAIConfig = {
+    apiUrl: null,
+    apiKey: null,
+    isConfigured: false,
+    lastValidated: null
+};
+
+// 会话管理 - 简单的内存存储（生产环境应使用更安全的存储）
+const userSessions = new Map();
+
+// 中间件：验证会话
+function requireAuth(req, res, next) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: '需要认证' });
+    }
+    
+    const token = authHeader.split(' ')[1];
+    if (!userSessions.has(token)) {
+        return res.status(401).json({ error: '会话无效或已过期' });
+    }
+    
+    const session = userSessions.get(token);
+    if (Date.now() > session.expiresAt) {
+        userSessions.delete(token);
+        return res.status(401).json({ error: '会话已过期' });
+    }
+    
+    req.session = session;
+    next();
+}
+
+// 生成会话令牌
+function generateSessionToken() {
+    return crypto.randomBytes(32).toString('hex');
+}
 
 // 项目结构分析配置
 const PROJECT_STRUCTURE = {
@@ -198,9 +242,120 @@ const PROJECT_STRUCTURE = {
 
 // 项目管理API
 
+// 检查AI配置状态
+app.get('/api/ai-config/status', requireAuth, (req, res) => {
+    res.json({
+        configured: userAIConfig.isConfigured,
+        config: userAIConfig.isConfigured ? {
+            apiUrl: userAIConfig.apiUrl,
+            lastValidated: userAIConfig.lastValidated
+        } : null
+    });
+});
+
+// 配置AI API
+app.post('/api/ai-config', async (req, res) => {
+    try {
+        const { apiUrl, apiKey } = req.body;
+        
+        if (!apiUrl || !apiKey) {
+            return res.status(400).json({ error: 'API URL和API Key都是必需的' });
+        }
+        
+        // 验证API配置
+        const testResult = await testAIConnection(apiUrl, apiKey);
+        if (!testResult.success) {
+            return res.status(400).json({ 
+                error: 'AI API配置验证失败', 
+                details: testResult.error 
+            });
+        }
+        
+        // 保存配置（生产环境应加密存储）
+        userAIConfig = {
+            apiUrl: apiUrl.trim(),
+            apiKey: apiKey.trim(),
+            isConfigured: true,
+            lastValidated: new Date().toISOString()
+        };
+        
+        // 生成会话令牌
+        const sessionToken = generateSessionToken();
+        userSessions.set(sessionToken, {
+            configuredAt: new Date(),
+            lastAccess: new Date()
+        });
+        
+        res.json({ 
+            success: true, 
+            message: 'AI配置验证成功',
+            sessionToken,
+            config: {
+                apiUrl: userAIConfig.apiUrl.replace(/\/[^\/]*$/, '/***'),
+                lastValidated: userAIConfig.lastValidated
+            }
+        });
+        
+        console.log('AI配置已更新并验证成功');
+    } catch (error) {
+        console.error('配置AI API失败:', error);
+        res.status(500).json({ error: '配置AI API失败' });
+    }
+});
+
+// 更新AI配置（用于修改密钥）
+app.put('/api/ai-config', requireAuth, async (req, res) => {
+    try {
+        const { apiUrl, apiKey } = req.body;
+        
+        if (!apiUrl || !apiKey) {
+            return res.status(400).json({ error: 'API URL和API Key都是必需的' });
+        }
+        
+        // 验证新的API配置
+        const testResult = await testAIConnection(apiUrl, apiKey);
+        if (!testResult.success) {
+            return res.status(400).json({ 
+                error: 'AI API配置验证失败', 
+                details: testResult.error 
+            });
+        }
+        
+        // 更新配置
+        userAIConfig = {
+            apiUrl: apiUrl.trim(),
+            apiKey: apiKey.trim(),
+            isConfigured: true,
+            lastValidated: new Date().toISOString()
+        };
+        
+        res.json({ 
+            success: true, 
+            message: 'AI配置更新成功',
+            config: {
+                apiUrl: userAIConfig.apiUrl.replace(/\/[^\/]*$/, '/***'),
+                lastValidated: userAIConfig.lastValidated
+            }
+        });
+        
+        console.log('AI配置已更新');
+    } catch (error) {
+        console.error('更新AI配置失败:', error);
+        res.status(500).json({ error: '更新AI配置失败' });
+    }
+});
+
 // 获取项目列表
 app.get('/api/projects', (req, res) => {
     try {
+        // 检查AI配置状态
+        if (!userAIConfig.isConfigured) {
+            return res.status(401).json({ 
+                error: '请先配置AI API', 
+                requiresAIConfig: true 
+            });
+        }
+        
         res.json(projects);
     } catch (error) {
         console.error('获取项目列表失败:', error);
@@ -404,20 +559,37 @@ app.get('/api/file/*', (req, res) => {
 });
 
 // AI代码分析接口
-app.post('/api/analyze', async (req, res) => {
+app.post('/api/analyze', requireAuth, async (req, res) => {
   try {
+    // 检查AI配置
+    if (!userAIConfig.isConfigured) {
+      return res.status(401).json({ 
+        error: '请先配置AI API', 
+        requiresAIConfig: true 
+      });
+    }
+    
     const { code, filename, action = 'explain' } = req.body;
     
     let prompt = '';
     switch (action) {
       case 'explain':
-        prompt = `请详细分析以下代码文件的功能和结构：
+        prompt = `请分析以下代码文件。请在<thinking>标签中展示你的思考过程，然后提供最终分析结果。
 
 文件名: ${filename}
 代码内容：
 \`\`\`
 ${code}
 \`\`\`
+
+<thinking>
+在这里展示分析思路：
+- 首先识别代码的主要结构
+- 分析关键函数和类的作用  
+- 理解代码的执行流程
+- 考虑与其他模块的关系
+- 评估代码质量和特点
+</thinking>
 
 请提供：
 1. 文件的主要功能和作用
@@ -429,13 +601,22 @@ ${code}
 请用中文回答，格式清晰易读。`;
         break;
       case 'review':
-        prompt = `请对以下代码进行代码审查：
+        prompt = `请对以下代码进行代码审查。请在<thinking>标签中展示你的审查思路，然后提供详细的审查结果。
 
 文件名: ${filename}
 代码内容：
 \`\`\`
 ${code}
 \`\`\`
+
+<thinking>
+在这里展示审查思路：
+- 检查代码规范和风格
+- 识别潜在的bug和问题
+- 分析性能瓶颈
+- 评估安全风险
+- 考虑可维护性问题
+</thinking>
 
 请从以下方面进行审查：
 1. 代码质量和规范性
@@ -447,13 +628,22 @@ ${code}
 请用中文回答。`;
         break;
       case 'document':
-        prompt = `请为以下代码生成详细的技术文档：
+        prompt = `请为以下代码生成详细的技术文档。请在<thinking>标签中展示你的文档规划思路，然后提供完整的文档。
 
 文件名: ${filename}
 代码内容：
 \`\`\`
 ${code}
 \`\`\`
+
+<thinking>
+在这里展示文档规划思路：
+- 分析代码的主要功能模块
+- 识别需要文档化的API接口
+- 梳理依赖关系和使用流程
+- 规划文档结构和内容组织
+- 考虑用户使用场景和示例
+</thinking>
 
 请生成包含以下内容的文档：
 1. 模块概述
@@ -466,7 +656,7 @@ ${code}
         break;
     }
     
-    const response = await axios.post(DEEPSEEK_API_URL, {
+    const response = await axios.post(userAIConfig.apiUrl, {
       model: 'deepseek-chat',
       messages: [
         {
@@ -474,17 +664,33 @@ ${code}
           content: prompt
         }
       ],
-      max_tokens: 2000,
-      temperature: 0.7
+      max_tokens: 3000,
+      temperature: 0.7,
+      stream: false
     }, {
       headers: {
-        'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
+        'Authorization': `Bearer ${userAIConfig.apiKey}`,
         'Content-Type': 'application/json'
       }
     });
     
+    const analysisContent = response.data.choices[0].message.content;
+    
+    // 解析思考过程和最终结果
+    let thinking = '';
+    let result = analysisContent;
+    
+    // 检查是否包含思考标记
+    const thinkingMatch = analysisContent.match(/<thinking>(.*?)<\/thinking>/s);
+    if (thinkingMatch) {
+      thinking = thinkingMatch[1].trim();
+      result = analysisContent.replace(/<thinking>.*?<\/thinking>/s, '').trim();
+    }
+    
     res.json({
-      analysis: response.data.choices[0].message.content
+      analysis: result,
+      thinking: thinking,
+      hasThinking: thinking.length > 0
     });
   } catch (error) {
     console.error('AI分析错误:', error.response?.data || error.message);
@@ -494,6 +700,221 @@ ${code}
     });
   }
 });
+
+// 测试AI连接
+async function testAIConnection(apiUrl, apiKey) {
+    try {
+        const response = await axios.post(apiUrl, {
+            model: 'deepseek-chat',
+            messages: [
+                { role: 'user', content: '测试连接，请回复"连接成功"' }
+            ],
+            max_tokens: 10,
+            temperature: 0
+        }, {
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
+            },
+            timeout: 10000
+        });
+        
+        if (response.data && response.data.choices && response.data.choices[0]) {
+            return { success: true };
+        } else {
+            return { success: false, error: 'AI API响应格式不正确' };
+        }
+    } catch (error) {
+        return { 
+            success: false, 
+            error: error.response?.data?.error?.message || error.message || '连接失败'
+        };
+    }
+}
+
+// 生成会话令牌
+function generateSessionToken() {
+    return require('crypto').randomBytes(32).toString('hex');
+}
+
+// 项目分析API
+app.post('/api/analyze-project', requireAuth, async (req, res) => {
+    try {
+        // 检查AI配置
+        if (!userAIConfig.isConfigured) {
+            return res.status(401).json({ 
+                error: '请先配置AI API', 
+                requiresAIConfig: true 
+            });
+        }
+        
+        const { projectId } = req.body;
+        
+        console.log('分析项目请求:', { projectId, 可用项目: projects.map(p => ({ id: p.id, name: p.name })) });
+        
+        if (!projectId) {
+            return res.status(400).json({ error: '项目ID不能为空' });
+        }
+        
+        // 不能分析默认项目
+        if (projectId === 'desktop') {
+            return res.status(400).json({ error: '默认项目不支持AI分析' });
+        }
+        
+        const project = projects.find(p => p.id === projectId);
+        if (!project) {
+            return res.status(404).json({ 
+                error: '项目不存在',
+                debug: {
+                    requestedId: projectId,
+                    availableProjects: projects.map(p => ({ id: p.id, name: p.name }))
+                }
+            });
+        }
+        
+        // 获取项目结构
+        const projectStructure = getSimpleDirectoryStructure(project.path);
+        
+        // 构建分析提示
+        const prompt = `请分析以下项目的目录结构，并为每个模块提供分类和功能说明。请在<thinking>标签中展示你的分析思路，然后提供项目重组方案。
+
+项目名称: ${project.name}
+项目路径: ${project.path}
+
+目录结构:
+${formatStructureForAI(projectStructure)}
+
+<thinking>
+在这里展示分析思路：
+- 首先识别项目的主要技术栈和架构模式
+- 分析各个目录的作用和包含的文件类型
+- 识别不同功能模块和层次结构
+- 考虑最佳实践的目录组织方式
+- 规划合理的模块分类和重组方案
+</thinking>
+
+请按照以下JSON格式返回分析结果，在分析内容后添加：
+
+[STRUCTURE_MAPPING]
+{
+  "categories": {
+    "协议实现": {
+      "description": "消息协议和通信相关",
+      "directories": ["protocol/", "message/"],
+      "color": "#e74c3c"
+    },
+    "核心服务": {
+      "description": "核心业务逻辑",
+      "directories": ["core/", "service/", "engine/"],
+      "color": "#3498db"
+    },
+    "存储层": {
+      "description": "数据存储和持久化",
+      "directories": ["storage/", "db/", "data/"],
+      "color": "#2ecc71"
+    },
+    "工具扩展": {
+      "description": "工具和扩展功能",
+      "directories": ["tools/", "utils/", "plugins/"],
+      "color": "#f39c12"
+    },
+    "测试文档": {
+      "description": "测试和文档",
+      "directories": ["test/", "tests/", "docs/", "examples/"],
+      "color": "#9b59b6"
+    },
+    "配置部署": {
+      "description": "配置和部署相关",
+      "directories": ["config/", "deploy/", "scripts/"],
+      "color": "#34495e"
+    }
+  }
+}
+[/STRUCTURE_MAPPING]
+
+请提供详细的项目分析和上述JSON格式的目录分类映射。`;
+
+        const response = await axios.post(userAIConfig.apiUrl, {
+            model: 'deepseek-chat',
+            messages: [
+                {
+                    role: 'user',
+                    content: prompt
+                }
+            ],
+            max_tokens: 4000,
+            temperature: 0.7
+        }, {
+            headers: {
+                'Authorization': `Bearer ${userAIConfig.apiKey}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const analysisContent = response.data.choices[0].message.content;
+        
+        // 解析思考过程和最终结果
+        let thinking = '';
+        let result = analysisContent;
+        let structureMapping = null;
+        
+        // 检查是否包含思考标记
+        const thinkingMatch = analysisContent.match(/<thinking>(.*?)<\/thinking>/s);
+        if (thinkingMatch) {
+            thinking = thinkingMatch[1].trim();
+            result = analysisContent.replace(/<thinking>.*?<\/thinking>/s, '').trim();
+        }
+        
+        // 检查是否包含结构映射
+        const structureMatch = analysisContent.match(/\[STRUCTURE_MAPPING\](.*?)\[\/STRUCTURE_MAPPING\]/s);
+        if (structureMatch) {
+            try {
+                structureMapping = JSON.parse(structureMatch[1].trim());
+                result = result.replace(/\[STRUCTURE_MAPPING\].*?\[\/STRUCTURE_MAPPING\]/s, '').trim();
+            } catch (e) {
+                console.error('解析结构映射失败:', e);
+            }
+        }
+
+        res.json({
+            analysis: result,
+            thinking: thinking,
+            hasThinking: thinking.length > 0,
+            structureMapping: structureMapping,
+            project: {
+                id: project.id,
+                name: project.name,
+                path: project.path
+            }
+        });
+        
+    } catch (error) {
+        console.error('项目分析错误:', error.response?.data || error.message);
+        res.status(500).json({ 
+            error: '项目分析失败',
+            details: error.response?.data?.error?.message || error.message
+        });
+    }
+});
+
+// 格式化项目结构为AI可读格式
+function formatStructureForAI(structure, depth = 0) {
+    let result = '';
+    const indent = '  '.repeat(depth);
+    
+    for (const item of structure) {
+        if (item.type === 'directory') {
+            result += `${indent}📁 ${item.name}/\n`;
+            if (item.children && item.children.length > 0) {
+                result += formatStructureForAI(item.children, depth + 1);
+            }
+        } else {
+            result += `${indent}📄 ${item.name}\n`;
+        }
+    }
+    
+    return result;
+}
 
 // 搜索文件和内容
 function searchFiles(dirPath, query, maxResults = 50) {

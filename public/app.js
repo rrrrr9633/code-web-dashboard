@@ -3,13 +3,50 @@ let currentFileContent = null;
 let currentProject = null;
 let currentRenameProjectId = null;
 let projects = [];
+let aiConfigured = false;
 
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', function() {
+    checkAIConfiguration();
     loadProjects();
     setupAddProjectForm();
     setupRenameProjectForm();
+    setupAIConfigForm();
 });
+
+// 检查AI配置状态
+async function checkAIConfiguration() {
+    try {
+        const sessionToken = localStorage.getItem('ai_session_token');
+        if (!sessionToken) {
+            // 没有会话令牌，跳转到登录页面
+            window.location.href = '/login.html';
+            return;
+        }
+
+        const response = await fetch('/api/ai-config/status', {
+            headers: {
+                'Authorization': `Bearer ${sessionToken}`
+            }
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            aiConfigured = data.configured;
+            if (data.configured) {
+                updateCurrentConfigDisplay(data.config);
+            }
+        } else {
+            // 会话无效，跳转到登录页面
+            localStorage.removeItem('ai_session_token');
+            localStorage.removeItem('ai_config');
+            window.location.href = '/login.html';
+        }
+    } catch (error) {
+        console.error('检查AI配置失败:', error);
+        window.location.href = '/login.html';
+    }
+}
 
 // 加载项目列表
 async function loadProjects() {
@@ -55,7 +92,7 @@ function renderProjectList() {
     }
     
     projectList.innerHTML = projects.map(project => `
-        <div class="project-item ${currentProject?.id === project.id ? 'active' : ''}" onclick="selectProject('${project.id}')">
+        <div class="project-item ${currentProject && currentProject.id === project.id ? 'active' : ''}" onclick="selectProject('${project.id}')">
             <div class="project-info">
                 <i class="fas fa-folder"></i>
                 <div>
@@ -83,7 +120,7 @@ async function selectProject(projectId) {
     const project = projects.find(p => p.id === projectId);
     if (!project) return;
     
-    currentProject = project;
+    currentProject = project; // 存储整个项目对象
     renderProjectList(); // 重新渲染以更新active状态
     await loadProjectStructure(project);
 }
@@ -113,24 +150,28 @@ async function loadProjectStructure(project = null) {
 
 // 更新概览卡片
 function updateOverviewCards(structure) {
-    let projectCount = projects.length;
+    // 只统计非默认项目
+    let projectCount = projects.filter(p => p.id !== 'desktop').length;
     let moduleCount = 0;
     let fileCount = 0;
     
-    function countItems(items) {
-        items.forEach(item => {
-            if (item.type === 'category') {
-                countItems(item.children || []);
-            } else if (item.type === 'directory') {
-                moduleCount++;
-                countItems(item.children || []);
-            } else if (item.type === 'file') {
-                fileCount++;
-            }
-        });
+    // 如果当前项目是默认项目，不计算其文件和模块数量
+    if (currentProject && currentProject.id !== 'desktop') {
+        function countItems(items) {
+            items.forEach(item => {
+                if (item.type === 'category') {
+                    countItems(item.children || []);
+                } else if (item.type === 'directory') {
+                    moduleCount++;
+                    countItems(item.children || []);
+                } else if (item.type === 'file') {
+                    fileCount++;
+                }
+            });
+        }
+        
+        countItems(structure);
     }
-    
-    countItems(structure);
     
     // 更新显示
     document.getElementById('projectCount').textContent = projectCount;
@@ -407,8 +448,14 @@ function formatFileSize(bytes) {
 
 // AI代码分析
 async function analyzeCode(action) {
+    if (!aiConfigured) {
+        showNotification('请先配置AI服务', 'warning');
+        openAIConfigModal();
+        return;
+    }
+
     if (!currentFile || !currentFileContent) {
-        alert('请先选择一个文件');
+        showNotification('请先选择一个文件', 'warning');
         return;
     }
 
@@ -431,10 +478,12 @@ async function analyzeCode(action) {
     aiButtons.forEach(btn => btn.disabled = true);
 
     try {
+        const sessionToken = localStorage.getItem('ai_session_token');
         const response = await fetch('/api/analyze', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${sessionToken}`
             },
             body: JSON.stringify({
                 code: currentFileContent,
@@ -450,8 +499,26 @@ async function analyzeCode(action) {
         }
 
         // 使用marked渲染Markdown
-        const htmlContent = marked.parse(data.analysis);
-        aiContent.innerHTML = htmlContent;
+        let displayContent = '';
+        
+        // 如果有思考过程，添加可展开的思考部分
+        if (data.hasThinking && data.thinking) {
+            displayContent += `
+                <div class="thinking-section">
+                    <div class="thinking-header" onclick="toggleThinking()">
+                        <i class="fas fa-brain"></i>
+                        <span>AI思考过程</span>
+                        <i class="fas fa-chevron-down thinking-toggle"></i>
+                    </div>
+                    <div class="thinking-content" id="thinkingContent" style="display: none;">
+                        ${marked.parse(data.thinking)}
+                    </div>
+                </div>
+            `;
+        }
+        
+        displayContent += `<div class="analysis-content">${marked.parse(data.analysis)}</div>`;
+        aiContent.innerHTML = displayContent;
 
     } catch (error) {
         console.error('AI分析失败:', error);
@@ -665,9 +732,24 @@ function setupAddProjectForm() {
 
 // 刷新项目
 async function refreshProject(projectId) {
-    if (currentProject?.id === projectId) {
-        await loadProjectStructure(currentProject);
+    try {
+        showNotification('正在刷新项目...', 'info');
+        
+        const project = projects.find(p => p.id === projectId);
+        if (!project) {
+            showNotification('项目不存在', 'error');
+            return;
+        }
+        
+        // 如果是当前选中的项目，重新加载结构
+        if (currentProject && currentProject.id === projectId) {
+            await loadProjectStructure(project);
+        }
+        
         showNotification('项目已刷新', 'success');
+    } catch (error) {
+        console.error('刷新项目失败:', error);
+        showNotification('刷新项目失败: ' + error.message, 'error');
     }
 }
 
@@ -881,3 +963,380 @@ function getNotificationColor(type) {
 
 // 初始化highlight.js
 hljs.highlightAll();
+
+// AI配置管理功能
+function setupAIConfigForm() {
+    const form = document.getElementById('aiConfigUpdateForm');
+    const presetButtons = document.querySelectorAll('#aiConfigModal .preset-btn');
+    const apiUrlInput = document.getElementById('configApiUrl');
+    
+    // 预设按钮处理
+    presetButtons.forEach(button => {
+        button.addEventListener('click', function() {
+            presetButtons.forEach(btn => btn.classList.remove('active'));
+            this.classList.add('active');
+            
+            const url = this.dataset.url;
+            if (url) {
+                apiUrlInput.value = url;
+            }
+        });
+    });
+
+    // 表单提交处理
+    form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        await updateAIConfiguration();
+    });
+}
+
+function openAIConfigModal() {
+    const modal = document.getElementById('aiConfigModal');
+    modal.style.display = 'block';
+    
+    // 加载当前配置
+    loadCurrentAIConfig();
+}
+
+function closeAIConfigModal() {
+    const modal = document.getElementById('aiConfigModal');
+    modal.style.display = 'none';
+}
+
+async function loadCurrentAIConfig() {
+    try {
+        const sessionToken = localStorage.getItem('ai_session_token');
+        const response = await fetch('/api/ai-config/status', {
+            headers: {
+                'Authorization': `Bearer ${sessionToken}`
+            }
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            if (data.configured) {
+                updateCurrentConfigDisplay(data.config);
+                
+                // 填充表单
+                document.getElementById('configApiUrl').value = data.config.apiUrl;
+                
+                // 选择对应的预设按钮
+                const presetButtons = document.querySelectorAll('#aiConfigModal .preset-btn');
+                presetButtons.forEach(btn => {
+                    btn.classList.remove('active');
+                    if (btn.dataset.url === data.config.apiUrl) {
+                        btn.classList.add('active');
+                    }
+                });
+            }
+        }
+    } catch (error) {
+        console.error('加载AI配置失败:', error);
+    }
+}
+
+function updateCurrentConfigDisplay(config) {
+    const currentConfigDiv = document.getElementById('currentConfig');
+    const lastValidated = new Date(config.lastValidated).toLocaleString('zh-CN');
+    
+    currentConfigDiv.innerHTML = `
+        <h4><i class="fas fa-check-circle" style="color: #28a745;"></i> 当前AI配置</h4>
+        <p><strong>API URL:</strong> ${config.apiUrl}</p>
+        <p><strong>最后验证:</strong> ${lastValidated}</p>
+        <p style="color: #28a745; margin: 0;"><i class="fas fa-shield-alt"></i> 配置有效</p>
+    `;
+}
+
+async function updateAIConfiguration() {
+    const apiUrl = document.getElementById('configApiUrl').value.trim();
+    const apiKey = document.getElementById('configApiKey').value.trim();
+    const submitButton = document.querySelector('#aiConfigUpdateForm .btn-primary');
+    const loading = submitButton.querySelector('.config-loading');
+    const btnText = submitButton.querySelector('.config-btn-text');
+    const testResult = document.getElementById('configTestResult');
+
+    if (!apiUrl || !apiKey) {
+        showConfigResult('请填写完整的API URL和API Key', 'error');
+        return;
+    }
+
+    // 显示加载状态
+    submitButton.disabled = true;
+    loading.style.display = 'inline-block';
+    btnText.style.display = 'none';
+    testResult.style.display = 'none';
+
+    try {
+        const sessionToken = localStorage.getItem('ai_session_token');
+        const response = await fetch('/api/ai-config', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${sessionToken}`
+            },
+            body: JSON.stringify({ apiUrl, apiKey })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            showConfigResult('AI配置更新成功！', 'success');
+            updateCurrentConfigDisplay(data.config);
+            aiConfigured = true;
+            
+            // 清空密码字段
+            document.getElementById('configApiKey').value = '';
+            
+            // 延迟关闭模态框
+            setTimeout(() => {
+                closeAIConfigModal();
+            }, 1500);
+        } else {
+            showConfigResult(data.error + (data.details ? ': ' + data.details : ''), 'error');
+        }
+    } catch (error) {
+        showConfigResult('更新失败: ' + error.message, 'error');
+    } finally {
+        // 隐藏加载状态
+        submitButton.disabled = false;
+        loading.style.display = 'none';
+        btnText.style.display = 'inline';
+    }
+}
+
+function showConfigResult(message, type) {
+    const testResult = document.getElementById('configTestResult');
+    testResult.textContent = message;
+    testResult.className = `test-result ${type}`;
+    testResult.style.display = 'block';
+}
+
+// 项目分析功能
+async function analyzeProject() {
+    if (!aiConfigured) {
+        showNotification('请先配置AI服务', 'warning');
+        openAIConfigModal();
+        return;
+    }
+
+    if (!currentProject) {
+        showNotification('请先选择一个项目', 'warning');
+        return;
+    }
+
+    // 检查是否是默认项目
+    if (currentProject.id === 'desktop') {
+        showNotification('默认项目不支持AI分析，请添加其他项目进行分析', 'warning');
+        return;
+    }
+
+    try {
+        showNotification('正在分析项目，请稍候...', 'info');
+        
+        const sessionToken = localStorage.getItem('ai_session_token');
+        const response = await fetch('/api/analyze-project', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${sessionToken}`
+            },
+            body: JSON.stringify({ 
+                projectId: currentProject.id
+            })
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            
+            // 显示AI面板
+            const aiPanel = document.getElementById('aiPanel');
+            const aiContent = document.getElementById('aiContent');
+            
+            let displayContent = `<div class="analysis-result">
+                <h3><i class="fas fa-project-diagram"></i> 项目分析报告</h3>`;
+            
+            // 如果有思考过程，添加可展开的思考部分
+            if (result.hasThinking && result.thinking) {
+                displayContent += `
+                    <div class="thinking-section">
+                        <div class="thinking-header" onclick="toggleThinking()">
+                            <i class="fas fa-brain"></i>
+                            <span>AI思考过程</span>
+                            <i class="fas fa-chevron-down thinking-toggle"></i>
+                        </div>
+                        <div class="thinking-content" id="thinkingContent" style="display: none;">
+                            ${formatAnalysisResult(result.thinking)}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            displayContent += `
+                <div class="analysis-content">${formatAnalysisResult(result.analysis)}</div>`;
+            
+            // 如果有结构映射，添加重组按钮
+            if (result.structureMapping) {
+                displayContent += `
+                    <div class="restructure-section">
+                        <button class="restructure-btn" onclick="applyProjectRestructure('${result.project.id}', '${encodeURIComponent(JSON.stringify(result.structureMapping))}')">
+                            <i class="fas fa-magic"></i> 应用目录重组
+                        </button>
+                    </div>
+                `;
+            }
+            
+            displayContent += `</div>`;
+            
+            aiContent.innerHTML = displayContent;
+            
+            aiPanel.classList.add('open');
+            showNotification('项目分析完成', 'success');
+        } else {
+            const error = await response.json();
+            console.error('项目分析错误:', error);
+            showNotification(error.error || '项目分析失败', 'error');
+        }
+    } catch (error) {
+        console.error('项目分析失败:', error);
+        showNotification('项目分析失败: ' + error.message, 'error');
+    }
+}
+
+function formatAnalysisResult(analysis) {
+    // 简单的Markdown渲染
+    return analysis
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+        .replace(/\n\n/g, '</p><p>')
+        .replace(/\n/g, '<br>')
+        .replace(/^/, '<p>')
+        .replace(/$/, '</p>');
+}
+
+// 切换思考过程显示
+function toggleThinking() {
+    const thinkingContent = document.getElementById('thinkingContent');
+    const toggleIcon = document.querySelector('.thinking-toggle');
+    
+    if (thinkingContent.style.display === 'none') {
+        thinkingContent.style.display = 'block';
+        toggleIcon.classList.remove('fa-chevron-down');
+        toggleIcon.classList.add('fa-chevron-up');
+    } else {
+        thinkingContent.style.display = 'none';
+        toggleIcon.classList.remove('fa-chevron-up');
+        toggleIcon.classList.add('fa-chevron-down');
+    }
+}
+
+// 应用项目重组
+async function applyProjectRestructure(projectId, encodedMapping) {
+    try {
+        const structureMapping = JSON.parse(decodeURIComponent(encodedMapping));
+        
+        showNotification('正在应用目录重组...', 'info');
+        
+        // 重新获取项目结构
+        const project = projects.find(p => p.id === projectId);
+        if (!project) {
+            showNotification('项目不存在', 'error');
+            return;
+        }
+        
+        // 获取原始项目结构
+        const response = await fetch(`/api/structure?project=${projectId}`);
+        const originalStructure = await response.json();
+        
+        // 应用分类重组
+        const categorizedStructure = categorizeProjectStructure(originalStructure, structureMapping);
+        
+        // 更新显示
+        renderFileTree(categorizedStructure);
+        updateOverviewCards(categorizedStructure);
+        
+        showNotification('目录重组已应用', 'success');
+        
+    } catch (error) {
+        console.error('应用目录重组失败:', error);
+        showNotification('应用目录重组失败: ' + error.message, 'error');
+    }
+}
+
+// 根据AI分析对项目结构进行分类
+function categorizeProjectStructure(structure, mapping) {
+    if (!mapping || !mapping.categories) {
+        return structure;
+    }
+    
+    const categories = mapping.categories;
+    const categorizedStructure = [];
+    const uncategorized = [];
+    
+    // 为每个分类创建容器
+    Object.keys(categories).forEach(categoryName => {
+        const category = categories[categoryName];
+        const categoryContainer = {
+            name: categoryName,
+            type: 'category',
+            path: '',
+            description: category.description,
+            color: category.color,
+            children: []
+        };
+        
+        // 查找属于这个分类的目录
+        structure.forEach(item => {
+            if (item.type === 'directory') {
+                const itemPath = item.name + '/';
+                if (category.directories.some(dir => 
+                    dir === itemPath || 
+                    itemPath.toLowerCase().includes(dir.toLowerCase().replace('/', '')) ||
+                    dir.toLowerCase().replace('/', '').includes(item.name.toLowerCase())
+                )) {
+                    categoryContainer.children.push(item);
+                }
+            }
+        });
+        
+        // 只有非空分类才添加
+        if (categoryContainer.children.length > 0) {
+            categorizedStructure.push(categoryContainer);
+        }
+    });
+    
+    // 添加未分类的项目
+    structure.forEach(item => {
+        let isCategorized = false;
+        
+        if (item.type === 'directory') {
+            const itemPath = item.name + '/';
+            Object.values(categories).forEach(category => {
+                if (category.directories.some(dir => 
+                    dir === itemPath || 
+                    itemPath.toLowerCase().includes(dir.toLowerCase().replace('/', '')) ||
+                    dir.toLowerCase().replace('/', '').includes(item.name.toLowerCase())
+                )) {
+                    isCategorized = true;
+                }
+            });
+        }
+        
+        if (!isCategorized) {
+            uncategorized.push(item);
+        }
+    });
+    
+    // 如果有未分类的项目，添加到"其他"分类
+    if (uncategorized.length > 0) {
+        categorizedStructure.push({
+            name: '其他模块',
+            type: 'category',
+            path: '',
+            description: '未分类的模块和文件',
+            color: '#7f8c8d',
+            children: uncategorized
+        });
+    }
+    
+    return categorizedStructure;
+}

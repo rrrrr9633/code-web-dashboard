@@ -117,6 +117,41 @@
             color: #667eea;
         }
 
+        .project-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .refresh-project-btn {
+            background: rgba(102, 126, 234, 0.1);
+            color: #667eea;
+            border: 1px solid rgba(102, 126, 234, 0.3);
+            padding: 8px;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .refresh-project-btn:hover {
+            background: rgba(102, 126, 234, 0.2);
+            transform: rotate(180deg);
+        }
+
+        .refresh-project-btn.spinning {
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
         .add-project-btn {
             background: linear-gradient(45deg, #667eea, #764ba2);
             color: white;
@@ -333,6 +368,141 @@
 
         .btn-secondary:hover {
             background: #e9ecef;
+        }
+
+        /* AI配置模态框特殊样式 */
+        .ai-config-content {
+            min-width: 500px;
+        }
+
+        .current-config {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #667eea;
+        }
+
+        .current-config h4 {
+            margin: 0 0 10px 0;
+            color: #667eea;
+        }
+
+        .preset-buttons {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .preset-btn {
+            flex: 1;
+            padding: 10px;
+            border: 2px solid #e9ecef;
+            background: white;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 0.9em;
+        }
+
+        .preset-btn:hover {
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        .preset-btn.active {
+            border-color: #667eea;
+            background: #667eea;
+            color: white;
+        }
+
+        .test-result {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 0.9em;
+        }
+
+        .test-result.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .test-result.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .config-loading {
+            color: #667eea;
+        }
+
+        /* 重组功能样式 */
+        .restructure-section {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 2px solid #e9ecef;
+            text-align: center;
+        }
+
+        .restructure-btn {
+            background: linear-gradient(45deg, #e74c3c, #c0392b);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(231, 76, 60, 0.3);
+        }
+
+        .restructure-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(231, 76, 60, 0.4);
+        }
+
+        .restructure-btn i {
+            margin-right: 8px;
+        }
+
+        /* 思考过程样式 */
+        .thinking-section {
+            margin: 20px 0;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .thinking-header {
+            background: #f8f9fa;
+            padding: 12px 16px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            transition: background 0.3s ease;
+        }
+
+        .thinking-header:hover {
+            background: #e9ecef;
+        }
+
+        .thinking-header i:first-child {
+            margin-right: 8px;
+            color: #667eea;
+        }
+
+        .thinking-toggle {
+            transition: transform 0.3s ease;
+        }
+
+        .thinking-content {
+            padding: 16px;
+            background: white;
+            border-top: 1px solid #e9ecef;
         }
 
         .tree-container {
@@ -558,6 +728,62 @@
         .ai-panel-content {
             padding: 20px;
             line-height: 1.6;
+        }
+
+        /* 思考过程样式 */
+        .thinking-section {
+            background: rgba(102, 126, 234, 0.05);
+            border: 1px solid rgba(102, 126, 234, 0.2);
+            border-radius: 10px;
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+
+        .thinking-header {
+            background: rgba(102, 126, 234, 0.1);
+            padding: 12px 16px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: background 0.3s ease;
+            user-select: none;
+        }
+
+        .thinking-header:hover {
+            background: rgba(102, 126, 234, 0.15);
+        }
+
+        .thinking-header i.fa-brain {
+            color: #667eea;
+        }
+
+        .thinking-header span {
+            flex: 1;
+            font-weight: 500;
+            color: #2c3e50;
+        }
+
+        .thinking-toggle {
+            color: #666;
+            transition: transform 0.3s ease;
+        }
+
+        .thinking-content {
+            padding: 16px;
+            background: white;
+            border-top: 1px solid rgba(102, 126, 234, 0.1);
+            font-size: 0.9em;
+            color: #666;
+        }
+
+        .thinking-content p {
+            margin-bottom: 8px;
+        }
+
+        .thinking-content ul, .thinking-content ol {
+            margin-left: 20px;
+            margin-bottom: 10px;
         }
 
         .code-container {
@@ -830,11 +1056,11 @@
                     <button class="ai-btn explain" onclick="analyzeCode('explain')" disabled>
                         <i class="fas fa-lightbulb"></i> 代码解析
                     </button>
-                    <button class="ai-btn review" onclick="analyzeCode('review')" disabled>
-                        <i class="fas fa-search"></i> 代码审查
+                    <button class="ai-btn config" onclick="openAIConfigModal()">
+                        <i class="fas fa-key"></i> 更改AI Keys
                     </button>
-                    <button class="ai-btn document" onclick="analyzeCode('document')" disabled>
-                        <i class="fas fa-file-alt"></i> 生成文档
+                    <button class="ai-btn project" onclick="analyzeProject()">
+                        <i class="fas fa-project-diagram"></i> 项目分析
                     </button>
                 </div>
             </div>
@@ -894,6 +1120,62 @@
                     <button type="submit" class="btn btn-primary">添加项目</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- AI配置模态框 -->
+    <div id="aiConfigModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-robot"></i> AI配置管理</h3>
+                <button class="close-modal" onclick="closeAIConfigModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="ai-config-content">
+                <div class="current-config" id="currentConfig">
+                    <!-- 当前配置信息 -->
+                </div>
+                
+                <form id="aiConfigUpdateForm">
+                    <div class="form-group">
+                        <label>AI服务预设:</label>
+                        <div class="preset-buttons">
+                            <button type="button" class="preset-btn" data-url="https://api.deepseek.com/v1/chat/completions">
+                                <i class="fas fa-brain"></i> DeepSeek
+                            </button>
+                            <button type="button" class="preset-btn" data-url="https://api.openai.com/v1/chat/completions">
+                                <i class="fas fa-comment-dots"></i> OpenAI
+                            </button>
+                            <button type="button" class="preset-btn" data-url="">
+                                <i class="fas fa-cog"></i> 自定义
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="configApiUrl">API URL:</label>
+                        <input type="url" id="configApiUrl" name="apiUrl" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="configApiKey">API Key:</label>
+                        <input type="password" id="configApiKey" name="apiKey" required>
+                    </div>
+                    
+                    <div class="modal-actions">
+                        <button type="button" class="btn btn-secondary" onclick="closeAIConfigModal()">取消</button>
+                        <button type="submit" class="btn btn-primary">
+                            <span class="config-loading" style="display: none;">
+                                <i class="fas fa-spinner fa-spin"></i> 验证中...
+                            </span>
+                            <span class="config-btn-text">更新配置</span>
+                        </button>
+                    </div>
+                </form>
+                
+                <div id="configTestResult" class="test-result" style="display: none;"></div>
+            </div>
         </div>
     </div>
 
