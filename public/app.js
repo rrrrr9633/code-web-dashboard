@@ -5,45 +5,115 @@ let currentRenameProjectId = null;
 let projects = [];
 let aiConfigured = false;
 
+// 调试函数：检查AI配置状态
+function debugAIStatus() {
+    console.log('🔍 AI配置状态调试:');
+    console.log('  - aiConfigured:', aiConfigured);
+    console.log('  - typeof aiConfigured:', typeof aiConfigured);
+    console.log('  - window.aiConfigured:', window.aiConfigured);
+    console.log('  - localStorage authToken:', !!localStorage.getItem('authToken'));
+    return aiConfigured;
+}
+
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', function() {
     checkAIConfiguration();
     loadProjects();
-    setupAddProjectForm();
+    setupUnifiedProjectForm();
     setupRenameProjectForm();
     setupAIConfigForm();
+    loadUserInfo(); // 加载用户信息
+    setupProjectManagerDrag(); // 设置项目管理器拖动
+    setupModalDragFunctionality(); // 设置模态框拖动功能
+    
+    // 显示数据库持久化提示
+    showPersistenceNotification();
 });
+
+// 显示数据库持久化通知
+function showPersistenceNotification() {
+    const notification = document.createElement('div');
+    notification.className = 'notification success';
+    notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: #27ae60;
+        color: white;
+        padding: 15px 20px;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        z-index: 1000;
+        max-width: 350px;
+        font-size: 14px;
+        line-height: 1.4;
+    `;
+    
+    notification.innerHTML = `
+        <div style="display: flex; align-items: center;">
+            <div style="margin-right: 10px;">🎉</div>
+            <div>
+                <strong>永久文件存储已启用！</strong><br>
+                您的项目文件现在保存在服务器数据库中，<br>
+                刷新页面不再需要重新授权访问文件。
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(notification);
+    
+    // 5秒后自动消失
+    setTimeout(() => {
+        notification.style.transform = 'translateX(100%)';
+        notification.style.opacity = '0';
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+            }
+        }, 300);
+    }, 5000);
+}
 
 // 检查AI配置状态
 async function checkAIConfiguration() {
     try {
-        const sessionToken = localStorage.getItem('ai_session_token');
+        const sessionToken = localStorage.getItem('authToken');
+        console.log('🔍 检查AI配置 - Token存在:', !!sessionToken);
+        
         if (!sessionToken) {
+            console.log('❌ 没有会话令牌，跳转到登录页面');
             // 没有会话令牌，跳转到登录页面
             window.location.href = '/login.html';
             return;
         }
 
+        console.log('📡 发送AI配置检查请求到服务器');
         const response = await fetch('/api/ai-config/status', {
             headers: {
                 'Authorization': `Bearer ${sessionToken}`
             }
         });
 
+        console.log('📥 AI配置检查响应状态:', response.status);
+        
         if (response.ok) {
             const data = await response.json();
+            console.log('✅ AI配置检查结果:', data);
             aiConfigured = data.configured;
+            console.log('🔧 设置aiConfigured为:', aiConfigured);
+            
             if (data.configured) {
                 updateCurrentConfigDisplay(data.config);
             }
         } else {
+            console.log('❌ 会话无效，跳转到登录页面');
             // 会话无效，跳转到登录页面
-            localStorage.removeItem('ai_session_token');
+            localStorage.removeItem('authToken');
             localStorage.removeItem('ai_config');
             window.location.href = '/login.html';
         }
     } catch (error) {
-        console.error('检查AI配置失败:', error);
+        console.error('❌ 检查AI配置失败:', error);
         window.location.href = '/login.html';
     }
 }
@@ -51,29 +121,50 @@ async function checkAIConfiguration() {
 // 加载项目列表
 async function loadProjects() {
     try {
-        const response = await fetch('/api/projects');
+        const sessionToken = localStorage.getItem('authToken');
+        const response = await fetch('/api/projects', {
+            headers: {
+                'Authorization': `Bearer ${sessionToken}`
+            }
+        });
         if (response.ok) {
             projects = await response.json();
         } else {
-            // 如果后端还没有项目管理API，初始化默认项目
-            projects = [{
-                id: 'default',
-                name: '默认项目',
-                path: './默认项目',
-                description: '默认代码项目示例'
-            }];
+            // 如果API不可用，初始化空项目列表
+            projects = [];
         }
         renderProjectList();
         
-        // 加载第一个项目（如果有的话）
+        // 根据项目数量显示不同的内容
         if (projects.length > 0) {
+            // 有项目时，加载第一个项目
             selectProject(projects[0].id);
+        } else {
+            // 没有项目时，显示添加项目的提示
+            showNoProjectsState();
         }
     } catch (error) {
         console.error('加载项目列表失败:', error);
-        // 降级处理，加载默认项目结构
-        loadProjectStructure();
+        // 降级处理，显示空状态
+        projects = [];
+        renderProjectList();
+        showNoProjectsState();
     }
+}
+
+// 显示没有项目时的状态
+function showNoProjectsState() {
+    const fileTree = document.getElementById('fileTree');
+    fileTree.innerHTML = `
+        <div class="info">
+            <i class="fas fa-folder-open" style="font-size: 2em; color: #ccc; margin-bottom: 15px;"></i>
+            <h3>暂无项目</h3>
+            <p>请使用上方"添加项目"按钮开始</p>
+        </div>
+    `;
+    
+    // 重置概览卡片
+    updateOverviewCards([]);
 }
 
 // 渲染项目列表
@@ -88,6 +179,9 @@ function renderProjectList() {
                 <p style="color: #999; font-size: 0.8em; text-align: center;">点击上方"添加项目"按钮开始</p>
             </div>
         `;
+        
+        // 同时更新文件树状态
+        showNoProjectsState();
         return;
     }
     
@@ -117,31 +211,102 @@ function renderProjectList() {
 
 // 选择项目
 async function selectProject(projectId) {
+    console.log('🎯 选择项目:', projectId);
     const project = projects.find(p => p.id === projectId);
-    if (!project) return;
+    if (!project) {
+        console.error('❌ 项目不存在:', projectId);
+        showNotification('项目不存在', 'error');
+        return;
+    }
     
+    console.log('✅ 找到项目:', project.name, '(ID:', project.id, ')');
     currentProject = project; // 存储整个项目对象
+    console.log('🔄 更新currentProject为:', currentProject.name);
+    
     renderProjectList(); // 重新渲染以更新active状态
     await loadProjectStructure(project);
 }
 
-// 加载项目结构
+// 加载项目结构 - 使用本地文件访问模式
 async function loadProjectStructure(project = null) {
     try {
-        const url = project ? `/api/structure?project=${project.id}` : '/api/structure';
-        const response = await fetch(url);
-        const structure = await response.json();
+        // 检查是否是本地文件项目
+        if (project && project.path && project.path.startsWith('[本地]')) {
+            // 这是一个本地文件项目，需要特殊处理
+            await handleLocalProjectLoad(project);
+            return;
+        }
         
-        // 检查是否有重组配置
-        if (project && project.id !== 'default') {
+        let structure = [];
+        let restructureConfig = null;
+        
+        // 如果有项目，从数据库获取结构
+        if (project && project.id) {
+            try {
+                const response = await fetch(`/api/projects/${project.id}/structure`);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.success) {
+                        structure = data.structure || [];
+                        console.log(`从数据库加载了项目 "${project.name}" 的结构，共 ${structure.length} 个根目录/文件`);
+                    }
+                } else {
+                    console.error('获取项目结构失败:', response.status, response.statusText);
+                }
+            } catch (error) {
+                console.error('获取项目结构出错:', error);
+            }
+            
+            // 检查是否有重组配置
+            try {
+                const restructureResponse = await fetch(`/api/projects/${project.id}/restructure`);
+                if (restructureResponse.ok) {
+                    const restructureData = await restructureResponse.json();
+                    if (restructureData.hasConfig && restructureData.config) {
+                        restructureConfig = restructureData.config;
+                        console.log('🔄 检测到重组配置，将应用分类显示');
+                    }
+                }
+            } catch (error) {
+                console.error('获取重组配置失败:', error);
+            }
+        }
+        
+        // 如果有重组配置，应用分类
+        let finalStructure = structure;
+        if (restructureConfig && restructureConfig.structureMapping) {
+            console.log('📂 应用项目重组分类显示');
+            console.log('🔧 重组配置:', restructureConfig);
+            console.log('📋 结构映射:', restructureConfig.structureMapping);
+            console.log('🗂️ 原始结构:', structure);
+            finalStructure = categorizeProjectStructure(structure, restructureConfig.structureMapping);
+            console.log('✨ 分类后结构:', finalStructure);
+        } else {
+            console.log('ℹ️ 没有重组配置，使用原始结构');
+        }
+        
+        // 检查重组状态并更新状态指示器
+        if (project) {
             await checkRestructureStatus(project.id);
         }
         
         // 更新概览卡片
-        updateOverviewCards(structure);
+        updateOverviewCards(finalStructure);
         
         // 渲染文件树
-        renderFileTree(structure);
+        renderFileTree(finalStructure);
+        
+        // 显示提示信息
+        const fileTree = document.getElementById('fileTree');
+        if (structure.length === 0) {
+            fileTree.innerHTML = `
+                <div class="info">
+                    <i class="fas fa-info-circle"></i>
+                    <h3>项目结构为空</h3>
+                    <p>请使用上方"添加项目"按钮添加项目或上传文件</p>
+                </div>
+            `;
+        }
     } catch (error) {
         console.error('加载项目结构失败:', error);
         document.getElementById('fileTree').innerHTML = `
@@ -151,6 +316,135 @@ async function loadProjectStructure(project = null) {
             </div>
         `;
     }
+}
+
+// 处理本地项目加载
+async function handleLocalProjectLoad(project) {
+    try {
+        // 尝试从本地存储恢复项目结构
+        const savedStructure = localStorage.getItem(`localProject_${project.id}`);
+        let structure = savedStructure ? JSON.parse(savedStructure) : null;
+        
+        // 如果有保存的结构且不为空，使用它
+        if (structure && structure.length > 0) {
+            // 更新概览卡片
+            updateOverviewCards(structure);
+            
+            // 渲染文件树
+            renderFileTree(structure);
+            
+            // 显示重新授权按钮（因为文件访问权限已失效）
+            const fileTree = document.getElementById('fileTree');
+            const reauthorizeButton = `
+                <div class="reauthorize-notice" style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 8px; padding: 15px; margin-bottom: 15px;">
+                    <div style="display: flex; align-items: center; margin-bottom: 10px;">
+                        <i class="fas fa-exclamation-triangle" style="color: #856404; margin-right: 8px;"></i>
+                        <strong style="color: #856404;">需要重新授权文件访问</strong>
+                    </div>
+                    <p style="margin: 8px 0; color: #856404; font-size: 0.9em;">
+                        页面刷新后，本地文件访问权限已失效。你可以查看项目结构，但需要重新授权才能打开文件。
+                    </p>
+                    <button class="btn btn-primary" onclick="reauthorizeLocalProject('${project.id}')" style="margin-top: 8px; font-size: 0.9em;">
+                        <i class="fas fa-key"></i> 重新授权访问
+                    </button>
+                </div>
+            `;
+            fileTree.insertAdjacentHTML('afterbegin', reauthorizeButton);
+            
+            // 检查重组状态
+            await checkRestructureStatus(project.id);
+            
+            return;
+        }
+        
+        // 如果没有保存的结构，显示需要授权的消息
+        const fileTree = document.getElementById('fileTree');
+        fileTree.innerHTML = `
+            <div class="info">
+                <i class="fas fa-folder-open" style="font-size: 2em; color: #ccc; margin-bottom: 15px;"></i>
+                <h3>本地文件项目</h3>
+                <p>此项目需要访问本地文件夹权限才能显示内容</p>
+                <button class="btn btn-primary" onclick="reauthorizeLocalProject('${project.id}')" style="margin-top: 15px;">
+                    <i class="fas fa-key"></i> 授权访问文件夹
+                </button>
+            </div>
+        `;
+        
+        // 重置概览卡片
+        updateOverviewCards([]);
+        
+    } catch (error) {
+        console.error('处理本地项目失败:', error);
+        const fileTree = document.getElementById('fileTree');
+        fileTree.innerHTML = `
+            <div class="error">
+                <i class="fas fa-exclamation-triangle"></i>
+                处理本地项目失败: ${error.message}
+            </div>
+        `;
+    }
+}
+
+// 重新授权本地项目访问
+async function reauthorizeLocalProject(projectId) {
+    try {
+        // 检查浏览器支持
+        if (!('showDirectoryPicker' in window)) {
+            showNotification('您的浏览器不支持此功能，请使用 Chrome 86+ 或 Edge 86+', 'error');
+            return;
+        }
+        
+        showNotification('请选择项目文件夹以重新授权访问...', 'info');
+        
+        // 显示文件夹选择器
+        const directoryHandle = await window.showDirectoryPicker();
+        
+        // 读取目录结构
+        const structure = await readDirectoryStructure(directoryHandle);
+        
+        // 保存到本地存储
+        localStorage.setItem(`localProject_${projectId}`, JSON.stringify(structure));
+        
+        // 保存目录句柄到全局变量（用于当前会话）
+        selectedDirectoryHandle = directoryHandle;
+        currentLocalStructure = structure;
+        
+        // 创建文件路径到handle的映射
+        createFileHandleMap(structure, directoryHandle);
+        
+        // 更新显示
+        updateOverviewCards(structure);
+        renderFileTree(structure);
+        
+        // 移除重新授权提示
+        const reauthorizeNotice = document.querySelector('.reauthorize-notice');
+        if (reauthorizeNotice) {
+            reauthorizeNotice.remove();
+        }
+        
+        showNotification(`已重新授权访问文件夹: ${directoryHandle.name}`, 'success');
+        
+    } catch (error) {
+        if (error.name !== 'AbortError') {
+            console.error('重新授权失败:', error);
+            showNotification('重新授权失败: ' + error.message, 'error');
+        }
+    }
+}
+
+// 创建文件路径到handle的映射
+function createFileHandleMap(structure, rootHandle, basePath = '') {
+    structure.forEach(item => {
+        const fullPath = basePath ? `${basePath}/${item.name}` : item.name;
+        
+        if (item.type === 'file') {
+            // 为文件项设置handle，这样可以在点击时正确打开
+            item.handle = item.handle || null; // 如果已有handle则保留，否则设为null
+            item.path = fullPath; // 更新完整路径
+        } else if (item.type === 'directory' && item.children) {
+            createFileHandleMap(item.children, rootHandle, fullPath);
+        }
+    });
 }
 
 // 检查重组状态
@@ -192,13 +486,13 @@ function updateProjectRestructureStatus(projectId, hasRestructure) {
 
 // 更新概览卡片
 function updateOverviewCards(structure) {
-    // 只统计非默认项目
-    let projectCount = projects.filter(p => p.id !== 'default').length;
+    // 统计所有项目
+    let projectCount = projects.length;
     let moduleCount = 0;
     let fileCount = 0;
     
-    // 如果当前项目是默认项目，不计算其文件和模块数量
-    if (currentProject && currentProject.id !== 'default') {
+    // 计算当前项目的文件和模块数量
+    if (currentProject && Array.isArray(structure)) {
         function countItems(items) {
             items.forEach(item => {
                 if (item.type === 'category') {
@@ -244,9 +538,12 @@ function createTreeItem(item) {
     labelDiv.className = 'tree-label';
     
     if (item.type === 'category') {
+        // 分类容器显示
+        const categoryColor = item.color || '#e74c3c';
         labelDiv.innerHTML = `
-            <i class="fas fa-layer-group" style="color: #e74c3c;"></i>
-            <span style="font-weight: bold; color: #2c3e50;">${item.name}</span>
+            <i class="fas fa-layer-group" style="color: ${categoryColor};"></i>
+            <span style="font-weight: bold; color: ${categoryColor};">${item.name}</span>
+            <small style="margin-left: 8px; color: #7f8c8d; font-size: 0.8em;">(${item.children ? item.children.length : 0}项)</small>
         `;
         
         labelDiv.onclick = function() {
@@ -255,7 +552,7 @@ function createTreeItem(item) {
 
         // 添加分类描述
         if (item.description) {
-            labelDiv.title = `${item.description}: ${item.details}`;
+            labelDiv.title = item.description;
         }
 
         itemDiv.appendChild(labelDiv);
@@ -271,23 +568,17 @@ function createTreeItem(item) {
             const icon = labelDiv.querySelector('i');
             icon.classList.remove('fa-layer-group');
             icon.classList.add('fa-folder-open');
+            icon.style.color = categoryColor;
         }
     } else if (item.type === 'directory') {
-        const categoryColor = getCategoryColor(item.category);
         labelDiv.innerHTML = `
-            <i class="fas fa-folder folder-icon" style="color: ${categoryColor};"></i>
+            <i class="fas fa-folder folder-icon" style="color: #3498db;"></i>
             <span>${item.name}</span>
-            <small style="margin-left: 8px; color: #7f8c8d; font-size: 0.8em;">[${item.category}]</small>
         `;
         
         labelDiv.onclick = function() {
             toggleDirectory(itemDiv, item);
         };
-
-        // 添加描述信息
-        if (item.description) {
-            labelDiv.title = `${item.description}: ${item.details}`;
-        }
 
         itemDiv.appendChild(labelDiv);
 
@@ -298,7 +589,7 @@ function createTreeItem(item) {
             renderFileTree(item.children, childrenDiv);
             itemDiv.appendChild(childrenDiv);
         }
-    } else {
+    } else if (item.type === 'file') {
         const fileIcon = getFileIcon(item.extension);
         labelDiv.innerHTML = `
             <i class="${fileIcon} file-icon"></i>
@@ -306,7 +597,7 @@ function createTreeItem(item) {
         `;
         
         labelDiv.onclick = function() {
-            openFile(item.path);
+            openFile(item.path, item.handle);
         };
 
         itemDiv.appendChild(labelDiv);
@@ -318,6 +609,11 @@ function createTreeItem(item) {
 // 获取分类颜色
 function getCategoryColor(category) {
     const colorMap = {
+        '源代码模块': '#3498db',      // 蓝色
+        '配置构建': '#f39c12',        // 橙色
+        '文档资源': '#27ae60',        // 绿色
+        '其他文件': '#95a5a6',        // 灰色
+        // 保留原有的颜色映射作为备用
         '协议实现': '#3498db',
         '核心服务': '#e67e22',
         '存储层': '#9b59b6',
@@ -375,46 +671,52 @@ function toggleDirectory(itemDiv, item) {
     }
 }
 
-// 加载文件内容 (重命名为openFile以保持一致性)
-async function openFile(filePath) {
+// 加载文件内容 - 统一处理本地文件和远程文件
+async function openFile(filePath, handle = null) {
     try {
         // 设置当前文件
         currentFile = filePath;
+        currentFileContent = null; // 重置文件内容
         
-        // UI状态管理 - 搜索功能保持可用，左侧目录始终可见
+        // UI状态管理
         document.getElementById('welcomeMessage').style.display = 'none';
         document.getElementById('searchResults').style.display = 'none';
         
-        // 显示加载状态
         const codeContent = document.getElementById('codeContent');
         codeContent.style.display = 'block';
+        
+        // 更新文件路径显示
+        document.getElementById('filePath').textContent = filePath;
+        
+        // 显示加载状态
         codeContent.innerHTML = `
             <div class="loading">
                 <i class="fas fa-spinner"></i>
                 正在加载文件...
             </div>
         `;
-
-        const projectParam = currentProject ? `?project=${currentProject.id}` : '';
-        const response = await fetch(`/api/file/${filePath}${projectParam}`);
-        const data = await response.json();
-
-        if (!response.ok) {
-            throw new Error(data.error);
+        
+        if (currentProject && currentProject.path && currentProject.path.startsWith('[本地]')) {
+            // 如果是本地项目，尝试从服务器获取文件内容
+            await loadFileFromServer(filePath);
+            return;
+        } else if (currentProject && currentProject.id) {
+            // 如果是数据库项目，从服务器获取文件内容
+            await loadFileFromServer(filePath);
+            return;
+        } else {
+            // 否则显示提示信息
+            codeContent.innerHTML = `
+                <div class="info">
+                    <i class="fas fa-info-circle"></i>
+                    请使用本地文件访问功能来查看文件内容
+                </div>
+            `;
+            
+            // 禁用AI按钮，因为没有文件内容
+            const aiButtons = document.querySelectorAll('.ai-btn');
+            aiButtons.forEach(btn => btn.disabled = true);
         }
-
-        currentFileContent = data.content;
-
-        // 更新文件路径显示
-        const displayPath = currentProject ? `${currentProject.name}/${filePath}` : filePath;
-        document.getElementById('filePath').textContent = displayPath;
-
-        // 启用AI按钮
-        const aiButtons = document.querySelectorAll('.ai-btn');
-        aiButtons.forEach(btn => btn.disabled = false);
-
-        // 渲染文件内容
-        renderFileContent(data);
 
     } catch (error) {
         console.error('加载文件失败:', error);
@@ -424,6 +726,63 @@ async function openFile(filePath) {
                 加载文件失败: ${error.message}
             </div>
         `;
+    }
+}
+
+// 从服务器加载文件内容
+async function loadFileFromServer(filePath) {
+    try {
+        console.log('📂 从服务器加载文件:', filePath, '项目ID:', currentProject.id);
+        
+        const sessionToken = localStorage.getItem('authToken');
+        // 正确处理文件路径，将每个路径段分别编码
+        const pathSegments = filePath.split('/').map(segment => encodeURIComponent(segment));
+        const encodedPath = pathSegments.join('/');
+        const url = `/api/projects/${currentProject.id}/files/${encodedPath}`;
+        
+        console.log('🌐 请求URL:', url);
+        
+        const response = await fetch(url, {
+            headers: {
+                'Authorization': `Bearer ${sessionToken}`
+            }
+        });
+        
+        console.log('📡 服务器响应状态:', response.status);
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('❌ 服务器响应错误:', errorText);
+            throw new Error('文件不存在或无法访问: ' + errorText);
+        }
+        
+        const fileData = await response.json();
+        console.log('✅ 文件数据加载成功:', fileData.path);
+        
+        currentFileContent = fileData.content;
+        
+        // 启用AI按钮
+        const aiButtons = document.querySelectorAll('.ai-btn');
+        aiButtons.forEach(btn => btn.disabled = false);
+        
+        // 渲染文件内容
+        renderFileContent(fileData);
+        
+    } catch (error) {
+        console.error('💥 从服务器加载文件失败:', error);
+        
+        // 显示错误信息
+        const codeContent = document.getElementById('codeContent');
+        codeContent.innerHTML = `
+            <div class="error">
+                <i class="fas fa-exclamation-triangle"></i>
+                加载文件失败: ${error.message}
+            </div>
+        `;
+        
+        // 禁用AI按钮
+        const aiButtons = document.querySelectorAll('.ai-btn');
+        aiButtons.forEach(btn => btn.disabled = true);
     }
 }
 
@@ -490,16 +849,30 @@ function formatFileSize(bytes) {
 
 // AI代码分析
 async function analyzeCode(action) {
+    console.log('🤖 开始AI代码分析');
+    debugAIStatus(); // 调试AI状态
+    
+    // 如果AI未配置，尝试重新检查一次
     if (!aiConfigured) {
+        console.log('⚠️ AI未配置，尝试重新检查...');
+        await checkAIConfiguration();
+        debugAIStatus(); // 再次检查状态
+    }
+    
+    if (!aiConfigured) {
+        console.log('❌ AI仍未配置，显示配置提示');
         showNotification('请先配置AI服务', 'warning');
         openAIConfigModal();
         return;
     }
 
     if (!currentFile || !currentFileContent) {
+        console.log('❌ 没有选择文件或文件内容为空');
         showNotification('请先选择一个文件', 'warning');
         return;
     }
+
+    console.log('✅ 开始AI分析，文件:', currentFile);
 
     const aiPanel = document.getElementById('aiPanel');
     const aiContent = document.getElementById('aiContent');
@@ -520,7 +893,7 @@ async function analyzeCode(action) {
     aiButtons.forEach(btn => btn.disabled = true);
 
     try {
-        const sessionToken = localStorage.getItem('ai_session_token');
+        const sessionToken = localStorage.getItem('authToken');
         const response = await fetch('/api/analyze', {
             method: 'POST',
             headers: {
@@ -630,15 +1003,61 @@ function handleSearch(event) {
 // 搜索文件
 async function searchFiles(query) {
     try {
-        const projectParam = currentProject ? `&project=${currentProject.id}` : '';
-        const response = await fetch(`/api/search?q=${encodeURIComponent(query)}${projectParam}`);
-        const results = await response.json();
+        if (!currentProject) {
+            displaySearchResults([], query);
+            return;
+        }
+
+        console.log('🔍 开始搜索文件:', query, '当前项目:', currentProject);
         
-        displaySearchResults(results, query);
+        // 使用服务器端搜索API（支持所有类型的项目）
+        const sessionToken = localStorage.getItem('authToken');
+        const response = await fetch(`/api/projects/${currentProject.id}/search?q=${encodeURIComponent(query)}`, {
+            headers: {
+                'Authorization': `Bearer ${sessionToken}`
+            }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            console.log('✅ 搜索结果:', data.results);
+            displaySearchResults(data.results, query);
+            return;
+        } else {
+            const error = await response.json();
+            console.error('❌ 搜索请求失败:', error);
+            throw new Error(error.error || '搜索失败');
+        }
+        
     } catch (error) {
-        console.error('搜索失败:', error);
+        console.error('💥 搜索失败:', error);
         displaySearchResults([], query);
+        showNotification('搜索失败: ' + error.message, 'error');
     }
+}
+
+// 在本地文件结构中搜索
+function searchInLocalStructure(structure, query, results = [], basePath = '') {
+    structure.forEach(item => {
+        const fullPath = basePath ? `${basePath}/${item.name}` : item.name;
+        
+        // 检查文件名是否匹配
+        if (item.name.toLowerCase().includes(query.toLowerCase())) {
+            results.push({
+                name: item.name,
+                path: fullPath,
+                type: item.type,
+                handle: item.handle
+            });
+        }
+        
+        // 如果是目录，递归搜索子项
+        if (item.type === 'directory' && item.children) {
+            searchInLocalStructure(item.children, query, results, fullPath);
+        }
+    });
+    
+    return results;
 }
 
 // 显示搜索结果
@@ -675,8 +1094,10 @@ function displaySearchResults(results, query) {
     
     results.forEach(result => {
         const highlightedContent = highlightSearchTerm(result.preview || '', query);
+        // 对于服务器项目，不需要handle，直接传递false
+        const hasHandle = result.handle ? 'true' : 'false';
         html += `
-            <div class="search-result-item" onclick="openFileFromSearch('${result.path}')">
+            <div class="search-result-item" onclick="openFileFromSearch('${result.path}', ${hasHandle})">
                 <div class="search-result-title">
                     <i class="fas fa-file-code"></i> ${result.name}
                 </div>
@@ -698,8 +1119,36 @@ function highlightSearchTerm(text, term) {
 }
 
 // 从搜索结果打开文件
-function openFileFromSearch(filePath) {
+function openFileFromSearch(filePath, hasHandle = false) {
+    if (hasHandle && currentLocalStructure) {
+        // 如果有handle，需要在结构中找到对应的文件项
+        const fileItem = findFileInStructure(currentLocalStructure, filePath);
+        if (fileItem && fileItem.handle) {
+            openFile(filePath, fileItem.handle);
+            return;
+        }
+    }
+    
+    // 如果没有handle或找不到文件项，使用普通方式打开
     openFile(filePath);
+}
+
+// 在文件结构中查找指定路径的文件
+function findFileInStructure(structure, targetPath, basePath = '') {
+    for (const item of structure) {
+        const fullPath = basePath ? `${basePath}/${item.name}` : item.name;
+        
+        if (fullPath === targetPath) {
+            return item;
+        }
+        
+        if (item.type === 'directory' && item.children) {
+            const found = findFileInStructure(item.children, targetPath, fullPath);
+            if (found) return found;
+        }
+    }
+    
+    return null;
 }
 
 // HTML转义函数
@@ -711,65 +1160,171 @@ function escapeHtml(text) {
 
 // 项目管理相关函数
 
-// 显示添加项目对话框
-function showAddProjectDialog() {
-    document.getElementById('addProjectModal').style.display = 'block';
-    document.getElementById('projectName').focus();
+// 显示统一的项目添加对话框
+function showUnifiedProjectDialog() {
+    const modal = document.getElementById('unifiedProjectModal');
+    modal.style.display = 'block';
+    
+    // 触发位置恢复事件
+    setTimeout(() => {
+        modal.dispatchEvent(new Event('show'));
+    }, 10);
+    
+    // 重置到选择界面
+    resetProjectOptions();
+    
+    // 检查浏览器兼容性
+    checkBrowserCompatibility();
 }
 
-// 关闭添加项目对话框
-function closeAddProjectDialog() {
-    document.getElementById('addProjectModal').style.display = 'none';
-    document.getElementById('addProjectForm').reset();
+// 关闭统一项目对话框
+function closeUnifiedProjectDialog() {
+    const modal = document.getElementById('unifiedProjectModal');
+    modal.style.display = 'none';
+    
+    // 重置所有状态
+    resetProjectOptions();
+    resetLocalFileState();
+    
+    // 清空表单
+    const form = document.getElementById('manualProjectForm');
+    if (form) form.reset();
 }
 
-// 设置添加项目表单
-function setupAddProjectForm() {
-    document.getElementById('addProjectForm').addEventListener('submit', async function(e) {
-        e.preventDefault();
-        
-        const formData = new FormData(e.target);
-        const projectData = {
-            name: formData.get('projectName'),
-            path: formData.get('projectPath')
-        };
-        
-        try {
-            const response = await fetch('/api/projects', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(projectData)
-            });
+// 选择项目添加方式
+function selectProjectOption(type) {
+    const localSection = document.getElementById('localFileSection');
+    const uploadSection = document.getElementById('uploadFileSection');
+    const manualSection = document.getElementById('manualAddSection');
+    const optionsDiv = document.querySelector('.project-options');
+    
+    // 隐藏选项卡
+    optionsDiv.style.display = 'none';
+    
+    if (type === 'local') {
+        if (localSection) localSection.style.display = 'block';
+        if (uploadSection) uploadSection.style.display = 'none';
+        if (manualSection) manualSection.style.display = 'none';
+        checkBrowserCompatibility();
+    } else if (type === 'upload') {
+        if (localSection) localSection.style.display = 'none';
+        if (uploadSection) uploadSection.style.display = 'block';
+        if (manualSection) manualSection.style.display = 'none';
+        // 聚焦到项目名称输入框
+        setTimeout(() => {
+            document.getElementById('uploadProjectName').focus();
+        }, 100);
+    } else if (type === 'manual') {
+        if (localSection) localSection.style.display = 'none';
+        if (uploadSection) uploadSection.style.display = 'none';
+        if (manualSection) manualSection.style.display = 'block';
+        // 聚焦到项目名称输入框
+        setTimeout(() => {
+            document.getElementById('projectName').focus();
+        }, 100);
+    }
+}
+
+// 重置到选择界面
+function resetProjectOptions() {
+    const localSection = document.getElementById('localFileSection');
+    const uploadSection = document.getElementById('uploadFileSection');
+    const manualSection = document.getElementById('manualAddSection');
+    const optionsDiv = document.querySelector('.project-options');
+    
+    // 显示选项卡，隐藏其他
+    optionsDiv.style.display = 'grid';
+    if (localSection) localSection.style.display = 'none';
+    if (uploadSection) uploadSection.style.display = 'none';
+    if (manualSection) manualSection.style.display = 'none';
+}
+
+// 检查浏览器兼容性
+function checkBrowserCompatibility() {
+    const infoBox = document.getElementById('compatibilityInfo');
+    
+    if ('showDirectoryPicker' in window) {
+        infoBox.innerHTML = '<i class="fas fa-check-circle"></i> <span>您的浏览器支持本地文件访问功能</span>';
+        infoBox.className = 'info-box success';
+    } else {
+        infoBox.innerHTML = '<i class="fas fa-exclamation-triangle"></i> <span>您的浏览器不支持本地文件访问，请使用 Chrome 86+ 或 Edge 86+</span>';
+        infoBox.className = 'info-box warning';
+    }
+}
+
+// 重置本地文件状态
+function resetLocalFileState() {
+    selectedDirectoryHandle = null;
+    currentLocalStructure = null;
+    const folderInfo = document.getElementById('selectedFolderInfo');
+    if (folderInfo) folderInfo.style.display = 'none';
+}
+
+// 设置统一项目表单
+function setupUnifiedProjectForm() {
+    // 处理手动添加项目表单
+    const manualForm = document.getElementById('manualProjectForm');
+    if (manualForm) {
+        manualForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
             
-            if (response.ok) {
-                const newProject = await response.json();
-                projects.push(newProject);
-                renderProjectList();
-                closeAddProjectDialog();
+            const formData = new FormData(e.target);
+            const projectData = {
+                name: formData.get('projectName'),
+                path: formData.get('projectPath')
+            };
+            
+            try {
+                const sessionToken = localStorage.getItem('authToken');
+                const response = await fetch('/api/projects', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${sessionToken}`
+                    },
+                    body: JSON.stringify(projectData)
+                });
                 
-                // 自动选择新添加的项目
-                selectProject(newProject.id);
-                
-                // 显示成功消息
-                showNotification('项目添加成功！', 'success');
-            } else {
-                const error = await response.json();
-                throw new Error(error.message || '添加项目失败');
+                if (response.ok) {
+                    const newProject = await response.json();
+                    projects.push(newProject);
+                    renderProjectList();
+                    closeUnifiedProjectDialog();
+                    
+                    // 自动选择新添加的项目
+                    selectProject(newProject.id);
+                    
+                    // 显示成功消息
+                    showNotification('项目添加成功！', 'success');
+                } else {
+                    const error = await response.json();
+                    throw new Error(error.error || '添加项目失败');
+                }
+            } catch (error) {
+                console.error('添加项目失败:', error);
+                showNotification('添加项目失败: ' + error.message, 'error');
             }
-        } catch (error) {
-            console.error('添加项目失败:', error);
-            showNotification('添加项目失败: ' + error.message, 'error');
-        }
-    });
+        });
+    }
+    
+    // 处理文件上传表单
+    const uploadForm = document.getElementById('uploadProjectForm');
+    if (uploadForm) {
+        uploadForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            await handleFileUpload(e.target);
+        });
+    }
     
     // 点击模态框外部关闭
-    document.getElementById('addProjectModal').addEventListener('click', function(e) {
-        if (e.target === this) {
-            closeAddProjectDialog();
-        }
-    });
+    const modal = document.getElementById('unifiedProjectModal');
+    if (modal) {
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal) {
+                closeUnifiedProjectDialog();
+            }
+        });
+    }
 }
 
 // 刷新项目
@@ -804,11 +1359,6 @@ async function renameProject(projectId) {
     }
     
     // 不能重命名默认项目
-    if (projectId === 'default') {
-        showNotification('默认项目不能重命名', 'warning');
-        return;
-    }
-    
     currentRenameProjectId = projectId;
     document.getElementById('newProjectName').value = project.name;
     document.getElementById('renameProjectModal').style.display = 'block';
@@ -847,10 +1397,12 @@ function setupRenameProjectForm() {
         }
         
         try {
+            const sessionToken = localStorage.getItem('authToken');
             const response = await fetch(`/api/projects/${currentRenameProjectId}`, {
                 method: 'PUT',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${sessionToken}`
                 },
                 body: JSON.stringify({ name: newName })
             });
@@ -893,41 +1445,53 @@ function setupRenameProjectForm() {
 
 // 移除项目
 async function removeProject(projectId) {
-    if (!confirm('确定要移除这个项目吗？')) {
+    if (!confirm('确定要移除这个项目吗？这将删除项目及其所有文件数据。')) {
         return;
     }
     
     try {
+        console.log('🗑️ 正在移除项目:', projectId);
+        const sessionToken = localStorage.getItem('authToken');
         const response = await fetch(`/api/projects/${projectId}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${sessionToken}`
+            }
         });
         
         if (response.ok) {
+            const result = await response.json();
+            
+            // 清理本地存储的项目数据
+            localStorage.removeItem(`localProject_${projectId}`);
+            
+            // 从项目列表中移除
             projects = projects.filter(p => p.id !== projectId);
-            renderProjectList();
+            console.log('📋 更新项目列表，剩余项目数:', projects.length);
             
-            // 如果移除的是当前项目，清空内容
+            // 如果移除的是当前项目，清空当前项目引用
             if (currentProject?.id === projectId) {
+                console.log('🔄 移除的是当前项目，重置currentProject');
                 currentProject = null;
-                document.getElementById('fileTree').innerHTML = `
-                    <div class="welcome" style="text-align: center; padding: 20px;">
-                        <i class="fas fa-folder-open" style="font-size: 2em; color: #ccc; margin-bottom: 10px;"></i>
-                        <p style="color: #666;">请选择一个项目开始分析</p>
-                    </div>
-                `;
-                
-                // 重置概览卡片
-                document.getElementById('projectCount').textContent = projects.length;
-                document.getElementById('fileCount').textContent = '-';
-                document.getElementById('moduleCount').textContent = '-';
             }
             
-            // 如果还有其他项目，选择第一个
-            if (projects.length > 0 && (!currentProject || currentProject.id === projectId)) {
-                selectProject(projects[0].id);
+            renderProjectList(); // 这里会自动处理空项目状态
+            
+            // 如果还有其他项目，选择第一个；否则已由renderProjectList处理空状态
+            if (projects.length > 0 && !currentProject) {
+                console.log('🎯 自动选择第一个项目:', projects[0].name);
+                await selectProject(projects[0].id);
+            } else if (projects.length === 0) {
+                console.log('📭 没有项目了，显示空状态');
+                showNoProjectsState();
             }
             
-            showNotification('项目已移除', 'success');
+            // 显示包含文件数量的通知
+            const deletedFiles = result.deletedFiles || 0;
+            const message = deletedFiles > 0 
+                ? `项目已移除，同时删除了 ${deletedFiles} 个文件`
+                : '项目已移除';
+            showNotification(message, 'success');
         } else {
             const errorData = await response.json();
             throw new Error(errorData.error || '移除项目失败');
@@ -1036,6 +1600,11 @@ function openAIConfigModal() {
     const modal = document.getElementById('aiConfigModal');
     modal.style.display = 'block';
     
+    // 触发位置恢复事件
+    setTimeout(() => {
+        modal.dispatchEvent(new Event('show'));
+    }, 10);
+    
     // 加载当前配置
     loadCurrentAIConfig();
     
@@ -1119,7 +1688,7 @@ function closeAIConfigModal() {
 
 async function loadCurrentAIConfig() {
     try {
-        const sessionToken = localStorage.getItem('ai_session_token');
+        const sessionToken = localStorage.getItem('authToken');
         const response = await fetch('/api/ai-config/status', {
             headers: {
                 'Authorization': `Bearer ${sessionToken}`
@@ -1181,7 +1750,7 @@ async function updateAIConfiguration() {
     testResult.style.display = 'none';
 
     try {
-        const sessionToken = localStorage.getItem('ai_session_token');
+        const sessionToken = localStorage.getItem('authToken');
         const response = await fetch('/api/ai-config', {
             method: 'PUT',
             headers: {
@@ -1197,6 +1766,9 @@ async function updateAIConfiguration() {
             showConfigResult('AI配置更新成功！', 'success');
             updateCurrentConfigDisplay(data.config);
             aiConfigured = true;
+            
+            // 更新账户信息区域的AI状态
+            checkUserAIStatus();
             
             // 清空密码字段
             document.getElementById('configApiKey').value = '';
@@ -1227,22 +1799,47 @@ function showConfigResult(message, type) {
 
 // 项目分析功能
 async function analyzeProject() {
+    console.log('🏗️ 开始项目分析');
+    console.log('📋 当前项目状态:', currentProject ? `${currentProject.name} (ID: ${currentProject.id})` : 'null');
+    debugAIStatus(); // 调试AI状态
+    
+    if (!currentProject) {
+        console.log('❌ 没有选择项目');
+        showNotification('请先选择一个项目', 'warning');
+        return;
+    }
+
+    // 检查是否为本地项目，禁止分析
+    if (currentProject.path && currentProject.path.startsWith('[本地]')) {
+        console.log('❌ 本地项目不支持AI分析');
+        showNotification('本地文件夹项目不支持AI分析功能，请使用上传到服务器的项目', 'warning');
+        return;
+    }
+    
+    // 如果AI未配置，尝试重新检查一次
     if (!aiConfigured) {
+        console.log('⚠️ AI未配置，尝试重新检查...');
+        await checkAIConfiguration();
+        debugAIStatus(); // 再次检查状态
+    }
+    
+    if (!aiConfigured) {
+        console.log('❌ AI仍未配置，显示配置提示');
         showNotification('请先配置AI服务', 'warning');
         openAIConfigModal();
         return;
     }
 
-    if (!currentProject) {
-        showNotification('请先选择一个项目', 'warning');
+    // 双重验证：确保项目仍然存在于项目列表中
+    const projectExists = projects.find(p => p.id === currentProject.id);
+    if (!projectExists) {
+        console.log('❌ 当前项目已不存在于项目列表中，重置currentProject');
+        currentProject = null;
+        showNotification('当前项目已不存在，请重新选择项目', 'warning');
         return;
     }
 
-    // 检查是否是默认项目
-    if (currentProject.id === 'default') {
-        showNotification('默认项目不支持AI分析，请添加其他项目进行分析', 'warning');
-        return;
-    }
+    console.log('✅ 开始项目分析，项目:', currentProject.name, '(ID:', currentProject.id, ')');
 
     try {
         // 首先检查是否已有分析结果
@@ -1374,7 +1971,7 @@ function showExistingAnalysisResult(config) {
 async function performNewAnalysis() {
     showNotification('正在分析项目，请稍候...', 'info');
     
-    const sessionToken = localStorage.getItem('ai_session_token');
+    const sessionToken = localStorage.getItem('authToken');
     const response = await fetch('/api/analyze-project', {
         method: 'POST',
         headers: {
@@ -1581,10 +2178,12 @@ async function applyProjectRestructure(projectId, encodedMapping) {
         }
         
         // 保存重组配置到服务器
+        const sessionToken = localStorage.getItem('authToken');
         const saveResponse = await fetch(`/api/projects/${projectId}/restructure`, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${sessionToken}`
             },
             body: JSON.stringify({ structureMapping })
         });
@@ -1617,8 +2216,12 @@ async function resetProjectRestructure(projectId) {
         showNotification('正在重置目录结构...', 'info');
         
         // 删除服务器上的重组配置
+        const sessionToken = localStorage.getItem('authToken');
         const response = await fetch(`/api/projects/${projectId}/restructure`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${sessionToken}`
+            }
         });
         
         if (!response.ok) {
@@ -1644,7 +2247,12 @@ async function resetProjectRestructure(projectId) {
 
 // 根据AI分析对项目结构进行分类
 function categorizeProjectStructure(structure, mapping) {
+    console.log('🔧 开始分类项目结构');
+    console.log('📁 输入结构:', structure);
+    console.log('🗺️ 映射配置:', mapping);
+    
     if (!mapping || !mapping.categories) {
+        console.log('⚠️ 没有有效的映射配置，返回原始结构');
         return structure;
     }
     
@@ -1652,15 +2260,19 @@ function categorizeProjectStructure(structure, mapping) {
     const categorizedStructure = [];
     const uncategorized = [];
     
+    console.log('📚 可用分类:', Object.keys(categories));
+    
     // 为每个分类创建容器
     Object.keys(categories).forEach(categoryName => {
         const category = categories[categoryName];
+        console.log(`🏷️ 处理分类: ${categoryName}`, category);
+        
         const categoryContainer = {
             name: categoryName,
             type: 'category',
             path: '',
             description: category.description,
-            color: category.color,
+            color: category.color || getCategoryColor(categoryName),
             children: []
         };
         
@@ -1668,11 +2280,17 @@ function categorizeProjectStructure(structure, mapping) {
         structure.forEach(item => {
             if (item.type === 'directory') {
                 const itemPath = item.name + '/';
-                if (category.directories.some(dir => 
-                    dir === itemPath || 
-                    itemPath.toLowerCase().includes(dir.toLowerCase().replace('/', '')) ||
-                    dir.toLowerCase().replace('/', '').includes(item.name.toLowerCase())
-                )) {
+                const isMatched = category.directories.some(dir => {
+                    const match = dir === itemPath || 
+                           itemPath.toLowerCase().includes(dir.toLowerCase().replace('/', '')) ||
+                           dir.toLowerCase().replace('/', '').includes(item.name.toLowerCase());
+                    if (match) {
+                        console.log(`✅ 匹配成功: ${item.name} -> ${categoryName} (规则: ${dir})`);
+                    }
+                    return match;
+                });
+                
+                if (isMatched) {
                     categoryContainer.children.push(item);
                 }
             }
@@ -1680,7 +2298,10 @@ function categorizeProjectStructure(structure, mapping) {
         
         // 只有非空分类才添加
         if (categoryContainer.children.length > 0) {
+            console.log(`📦 添加分类 "${categoryName}" 包含 ${categoryContainer.children.length} 个项目`);
             categorizedStructure.push(categoryContainer);
+        } else {
+            console.log(`📭 分类 "${categoryName}" 为空，跳过`);
         }
     });
     
@@ -1702,12 +2323,14 @@ function categorizeProjectStructure(structure, mapping) {
         }
         
         if (!isCategorized) {
+            console.log(`📄 未分类项目: ${item.name}`);
             uncategorized.push(item);
         }
     });
     
     // 如果有未分类的项目，添加到"其他"分类
     if (uncategorized.length > 0) {
+        console.log(`📂 创建"其他模块"分类，包含 ${uncategorized.length} 个项目`);
         categorizedStructure.push({
             name: '其他模块',
             type: 'category',
@@ -1718,5 +2341,960 @@ function categorizeProjectStructure(structure, mapping) {
         });
     }
     
+    console.log('🎯 分类完成，最终结构:', categorizedStructure);
     return categorizedStructure;
+}
+
+// 本地文件管理器功能
+let selectedDirectoryHandle = null;
+let currentLocalStructure = null;
+
+// 选择本地文件夹（在统一对话框中使用）
+async function selectLocalFolder() {
+    try {
+        // 检查浏览器支持
+        if (!('showDirectoryPicker' in window)) {
+            showNotification('您的浏览器不支持此功能，请使用 Chrome 86+ 或 Edge 86+', 'error');
+            return;
+        }
+        
+        // 显示文件夹选择器
+        selectedDirectoryHandle = await window.showDirectoryPicker();
+        
+        // 显示选择的文件夹信息
+        const folderInfo = document.getElementById('selectedFolderInfo');
+        const folderName = document.getElementById('selectedFolderName');
+        
+        folderName.textContent = selectedDirectoryHandle.name;
+        folderInfo.style.display = 'block';
+        
+        showNotification(`已选择文件夹: ${selectedDirectoryHandle.name}`, 'success');
+        
+    } catch (error) {
+        if (error.name !== 'AbortError') {
+            console.error('选择文件夹失败:', error);
+            showNotification('选择文件夹失败: ' + error.message, 'error');
+        }
+    }
+}
+
+// 加载本地目录结构并创建项目（合并功能）
+async function loadAndCreateLocalProject() {
+    if (!selectedDirectoryHandle) {
+        showNotification('请先选择一个文件夹', 'warning');
+        return;
+    }
+    
+    try {
+        showNotification('正在创建项目并读取目录结构...', 'info');
+        
+        // 1. 首先创建项目
+        const projectData = {
+            name: selectedDirectoryHandle.name,
+            path: `[本地] ${selectedDirectoryHandle.name}`,
+            description: '从本地文件夹创建的项目'
+        };
+        
+        const sessionToken = localStorage.getItem('authToken');
+        const response = await fetch('/api/projects', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${sessionToken}`
+            },
+            body: JSON.stringify(projectData)
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || '创建项目失败');
+        }
+        
+        const newProject = await response.json();
+        projects.push(newProject);
+        renderProjectList();
+        
+        // 2. 然后读取目录结构
+        currentLocalStructure = await readDirectoryStructure(selectedDirectoryHandle);
+        
+        // 3. 读取并上传文件内容到服务器
+        showNotification('正在上传文件内容到服务器...', 'info');
+        const filesData = await readAllFileContents(selectedDirectoryHandle, currentLocalStructure);
+        
+        await uploadProjectFiles(newProject.id, filesData, currentLocalStructure);
+        
+        // 4. 保存结构到本地存储以便页面刷新后恢复
+        localStorage.setItem(`localProject_${newProject.id}`, JSON.stringify(currentLocalStructure));
+        
+        // 5. 选择新项目并加载结构 - 使用selectProject函数确保状态正确同步
+        console.log('🎯 创建完成，选择新项目:', newProject.name, '(ID:', newProject.id, ')');
+        await selectProject(newProject.id);
+        
+        // 关闭模态框
+        closeUnifiedProjectDialog();
+        
+        showNotification('项目创建成功，文件已上传到服务器！', 'success');
+        
+    } catch (error) {
+        console.error('创建项目失败:', error);
+        showNotification('创建项目失败: ' + error.message, 'error');
+    }
+}
+
+// 原来的独立函数保留以兼容其他调用
+async function showLocalFileManager() {
+    showUnifiedProjectDialog();
+    // 自动选择本地文件选项
+    setTimeout(() => {
+        selectProjectOption('local');
+    }, 100);
+}
+
+// 关闭本地文件管理器（重定向到统一对话框）
+function closeLocalFileManager() {
+    closeUnifiedProjectDialog();
+}
+
+// 递归读取目录结构
+async function readDirectoryStructure(directoryHandle, maxDepth = 5, currentDepth = 0) {
+    if (currentDepth >= maxDepth) {
+        return [];
+    }
+    
+    const items = [];
+    
+    try {
+        for await (const entry of directoryHandle.values()) {
+            if (entry.name.startsWith('.')) {
+                continue; // 跳过隐藏文件/文件夹
+            }
+            
+            if (entry.kind === 'directory') {
+                // 跳过常见的构建目录
+                if (['node_modules', 'build', 'dist', '.git', '.vscode'].includes(entry.name)) {
+                    continue;
+                }
+                
+                const children = await readDirectoryStructure(entry, maxDepth, currentDepth + 1);
+                items.push({
+                    name: entry.name,
+                    type: 'directory',
+                    path: entry.name,
+                    children: children,
+                    handle: entry
+                });
+            } else if (entry.kind === 'file') {
+                const extension = getFileExtension(entry.name);
+                items.push({
+                    name: entry.name,
+                    type: 'file',
+                    path: entry.name,
+                    extension: extension,
+                    handle: entry
+                });
+            }
+        }
+    } catch (error) {
+        console.error('读取目录失败:', error);
+    }
+    
+    return items.sort((a, b) => {
+        // 目录优先，然后按名称排序
+        if (a.type !== b.type) {
+            return a.type === 'directory' ? -1 : 1;
+        }
+        return a.name.localeCompare(b.name);
+    });
+}
+
+// 读取所有文件内容
+async function readAllFileContents(directoryHandle, structure, basePath = '') {
+    const files = [];
+    let totalSize = 0;
+    const maxFileSize = 50 * 1024 * 1024; // 50MB per file limit
+    const maxTotalSize = 2 * 1024 * 1024 * 1024; // 2GB total limit
+    
+    for (const item of structure) {
+        const fullPath = basePath ? `${basePath}/${item.name}` : item.name;
+        
+        if (item.type === 'file' && item.handle) {
+            try {
+                // 只读取文本文件且不超过大小限制
+                if (isTextFileExtension(item.extension)) {
+                    const file = await item.handle.getFile();
+                    
+                    // 跳过太大的文件
+                    if (file.size > maxFileSize) {
+                        console.log(`跳过大文件: ${fullPath} (${file.size} bytes)`);
+                        continue;
+                    }
+                    
+                    // 检查总大小限制
+                    if (totalSize + file.size > maxTotalSize) {
+                        console.log(`达到总大小限制，停止读取更多文件`);
+                        break;
+                    }
+                    
+                    const content = await file.text();
+                    
+                    files.push({
+                        path: fullPath,
+                        content: content,
+                        size: file.size,
+                        lastModified: file.lastModified
+                    });
+                    
+                    totalSize += file.size;
+                    
+                    // 显示进度
+                    if (files.length % 10 === 0) {
+                        showNotification(`已读取 ${files.length} 个文件...`, 'info');
+                    }
+                }
+            } catch (error) {
+                console.warn(`读取文件失败 ${fullPath}:`, error);
+            }
+        } else if (item.type === 'directory' && item.children) {
+            const childFiles = await readAllFileContents(directoryHandle, item.children, fullPath);
+            files.push(...childFiles);
+            
+            // 重新计算总大小
+            totalSize = files.reduce((sum, f) => sum + f.size, 0);
+            if (totalSize > maxTotalSize) {
+                break;
+            }
+        }
+    }
+    
+    console.log(`读取完成: ${files.length} 个文件, 总大小: ${(totalSize / 1024 / 1024).toFixed(2)} MB`);
+    return files;
+}
+
+// 检查是否为文本文件扩展名
+function isTextFileExtension(extension) {
+    const textExtensions = ['.js', '.ts', '.jsx', '.tsx', '.py', '.java', '.c', '.cpp', '.h', '.css', '.html', '.xml', '.json', '.md', '.txt', '.sql', '.sh', '.bat', '.yml', '.yaml', '.toml', '.ini', '.cfg', '.php', '.rb', '.go', '.rs', '.swift', '.kt'];
+    return textExtensions.includes(extension.toLowerCase());
+}
+
+// 上传项目文件到服务器（分批上传）
+async function uploadProjectFiles(projectId, files, structure) {
+    try {
+        const sessionToken = localStorage.getItem('authToken');
+        const batchSize = 20; // 每批上传20个文件
+        const batches = [];
+        
+        // 将文件分批
+        for (let i = 0; i < files.length; i += batchSize) {
+            batches.push(files.slice(i, i + batchSize));
+        }
+        
+        console.log(`准备分 ${batches.length} 批上传 ${files.length} 个文件`);
+        
+        // 分批上传
+        for (let i = 0; i < batches.length; i++) {
+            const batch = batches[i];
+            showNotification(`上传批次 ${i + 1}/${batches.length} (${batch.length} 个文件)...`, 'info');
+            
+            const response = await fetch(`/api/projects/${projectId}/upload`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${sessionToken}`
+                },
+                body: JSON.stringify({
+                    files: batch,
+                    structure: i === 0 ? structure : [], // 只在第一批时发送结构
+                    isLastBatch: i === batches.length - 1
+                })
+            });
+            
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || `上传批次 ${i + 1} 失败`);
+            }
+            
+            const result = await response.json();
+            console.log(`批次 ${i + 1} 上传成功:`, result);
+        }
+        
+        showNotification(`所有文件上传完成！`, 'success');
+        return { success: true, totalFiles: files.length };
+    } catch (error) {
+        console.error('上传文件失败:', error);
+        throw error;
+    }
+}
+
+// 获取文件扩展名
+function getFileExtension(filename) {
+    const lastDot = filename.lastIndexOf('.');
+    return lastDot > 0 ? filename.substring(lastDot) : '';
+}
+
+// 重写openFile函数以支持本地文件访问
+async function openLocalFile(filePath, handle) {
+    try {
+        // 设置当前文件
+        currentFile = filePath;
+        
+        // UI状态管理
+        document.getElementById('welcomeMessage').style.display = 'none';
+        document.getElementById('searchResults').style.display = 'none';
+        
+        // 显示加载状态
+        const codeContent = document.getElementById('codeContent');
+        codeContent.style.display = 'block';
+        codeContent.innerHTML = `
+            <div class="loading">
+                <i class="fas fa-spinner"></i>
+                正在加载文件...
+            </div>
+        `;
+
+        // 读取文件内容
+        const file = await handle.getFile();
+        const content = await file.text();
+        currentFileContent = content;
+
+        // 更新文件路径显示
+        document.getElementById('filePath').textContent = filePath;
+
+        // 启用AI按钮
+        const aiButtons = document.querySelectorAll('.ai-btn');
+        aiButtons.forEach(btn => btn.disabled = false);
+
+        // 渲染文件内容
+        const fileData = {
+            path: filePath,
+            content: content,
+            size: file.size,
+            modified: file.lastModified,
+            extension: getFileExtension(file.name)
+        };
+        
+        renderFileContent(fileData);
+
+    } catch (error) {
+        console.error('加载本地文件失败:', error);
+        document.getElementById('codeContent').innerHTML = `
+            <div class="error">
+                <i class="fas fa-exclamation-triangle"></i>
+                加载文件失败: ${error.message}
+            </div>
+        `;
+    }
+}
+
+// 账户信息相关功能
+function loadUserInfo() {
+    try {
+        const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
+        const userName = userInfo.username || '未知用户';
+        
+        // 更新用户名显示
+        document.getElementById('userName').textContent = userName;
+        
+        // 检查AI配置状态
+        checkUserAIStatus();
+    } catch (error) {
+        console.error('加载用户信息失败:', error);
+        document.getElementById('userName').textContent = '加载失败';
+    }
+}
+
+async function checkUserAIStatus() {
+    try {
+        const sessionToken = localStorage.getItem('authToken');
+        if (!sessionToken) {
+            document.getElementById('aiStatusText').textContent = '未登录';
+            return;
+        }
+
+        const response = await fetch('/api/ai-config/status', {
+            headers: {
+                'Authorization': `Bearer ${sessionToken}`
+            }
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            const statusElement = document.getElementById('aiStatusText');
+            const statusIcon = document.querySelector('.ai-status i');
+            
+            // 重要：同步更新全局AI配置状态
+            aiConfigured = data.configured;
+            console.log('🔄 checkUserAIStatus更新aiConfigured为:', aiConfigured);
+            
+            if (data.configured && data.config) {
+                const provider = data.config.provider || '未知服务';
+                statusElement.textContent = `使用 ${provider}`;
+                statusIcon.style.color = '#27ae60';
+                statusIcon.className = 'fas fa-robot';
+            } else {
+                statusElement.textContent = 'AI未配置';
+                statusIcon.style.color = '#e74c3c';
+                statusIcon.className = 'fas fa-exclamation-triangle';
+            }
+        } else {
+            document.getElementById('aiStatusText').textContent = '检查失败';
+            document.querySelector('.ai-status i').style.color = '#666';
+            // 如果请求失败，不改变aiConfigured状态
+        }
+    } catch (error) {
+        console.error('检查AI配置状态失败:', error);
+        document.getElementById('aiStatusText').textContent = '检查失败';
+        // 如果发生错误，不改变aiConfigured状态
+    }
+}
+
+function toggleUserMenu() {
+    const userMenu = document.getElementById('userMenu');
+    const isVisible = userMenu.style.display !== 'none';
+    
+    if (isVisible) {
+        userMenu.style.display = 'none';
+    } else {
+        userMenu.style.display = 'block';
+        // 点击其他地方时关闭菜单
+        setTimeout(() => {
+            document.addEventListener('click', closeUserMenuOnClickOutside, { once: true });
+        }, 100);
+    }
+}
+
+function closeUserMenuOnClickOutside(event) {
+    const userMenu = document.getElementById('userMenu');
+    const userAvatar = document.getElementById('userAvatarBtn');
+    
+    if (!userMenu.contains(event.target) && !userAvatar.contains(event.target)) {
+        userMenu.style.display = 'none';
+    }
+}
+
+function logout() {
+    if (confirm('确定要登出吗？')) {
+        // 清除本地存储
+        localStorage.removeItem('authToken');
+        localStorage.removeItem('user_info');
+        localStorage.removeItem('aiConfig');
+        
+        // 跳转到登录页面
+        window.location.href = '/login.html';
+    }
+}
+
+// 文件上传处理函数
+async function handleFileUpload(form) {
+    const projectName = form.projectName.value.trim();
+    const filesInput = form.files;
+    const files = Array.from(filesInput.files);
+    
+    if (!projectName) {
+        showNotification('请输入项目名称', 'error');
+        return;
+    }
+    
+    if (files.length === 0) {
+        showNotification('请选择要上传的文件夹', 'error');
+        return;
+    }
+    
+    // 检查文件总大小
+    const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+    const maxSize = 2 * 1024 * 1024 * 1024; // 2GB
+    
+    if (totalSize > maxSize) {
+        showNotification(`文件总大小超过2GB限制，当前大小：${formatFileSize(totalSize)}`, 'error');
+        return;
+    }
+    
+    try {
+        // 显示进度
+        showUploadProgress(true);
+        updateProgress(0, '正在创建项目...', 0, files.length, 0, totalSize);
+        
+        // 1. 首先创建项目
+        const sessionToken = localStorage.getItem('authToken');
+        const projectResponse = await fetch('/api/projects', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${sessionToken}`
+            },
+            body: JSON.stringify({
+                name: projectName,
+                path: `uploaded/${projectName}` // 虚拟路径，表示上传的项目
+            })
+        });
+        
+        if (!projectResponse.ok) {
+            const error = await projectResponse.json();
+            throw new Error(error.error || '创建项目失败');
+        }
+        
+        const newProject = await projectResponse.json();
+        updateProgress(5, '项目创建成功，开始上传文件...', 0, files.length, 0, totalSize);
+        
+        // 2. 分批上传文件
+        const batchSize = 10; // 每批上传10个文件
+        let uploadedFiles = 0;
+        let uploadedSize = 0;
+        
+        for (let i = 0; i < files.length; i += batchSize) {
+            const batch = files.slice(i, i + batchSize);
+            const batchData = [];
+            
+            // 读取当前批次的文件内容
+            for (const file of batch) {
+                try {
+                    const content = await readFileAsText(file);
+                    batchData.push({
+                        path: file.webkitRelativePath || file.name,
+                        content: content,
+                        size: file.size,
+                        lastModified: file.lastModified,
+                        type: file.type
+                    });
+                } catch (readError) {
+                    console.warn(`无法读取文件 ${file.name}:`, readError);
+                    // 对于无法读取的文件，记录基本信息
+                    batchData.push({
+                        path: file.webkitRelativePath || file.name,
+                        content: `[无法读取文件内容: ${readError.message}]`,
+                        size: file.size,
+                        lastModified: file.lastModified,
+                        type: file.type
+                    });
+                }
+            }
+            
+            // 上传当前批次
+            const isLastBatch = i + batchSize >= files.length;
+            
+            let requestBody = {
+                files: batchData,
+                isLastBatch: isLastBatch
+            };
+            
+            // 在最后一批添加项目结构信息
+            if (isLastBatch) {
+                const projectStructure = generateProjectStructure(files);
+                requestBody.structure = projectStructure;
+            }
+            
+            const uploadResponse = await fetch(`/api/projects/${newProject.id}/upload`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${sessionToken}`
+                },
+                body: JSON.stringify(requestBody)
+            });
+            
+            if (!uploadResponse.ok) {
+                const error = await uploadResponse.json();
+                throw new Error(error.error || '上传文件失败');
+            }
+            
+            // 更新进度
+            uploadedFiles += batch.length;
+            uploadedSize += batch.reduce((sum, file) => sum + file.size, 0);
+            const progress = Math.round((uploadedFiles / files.length) * 95) + 5; // 5-100%
+            
+            updateProgress(
+                progress, 
+                `正在上传文件... 批次 ${Math.floor(i / batchSize) + 1}/${Math.ceil(files.length / batchSize)}`,
+                uploadedFiles,
+                files.length,
+                uploadedSize,
+                totalSize
+            );
+        }
+        
+        // 3. 完成上传
+        updateProgress(100, '上传完成！', files.length, files.length, totalSize, totalSize);
+        
+        // 更新项目列表
+        projects.push(newProject);
+        renderProjectList();
+        
+        // 自动选择新项目
+        selectProject(newProject.id);
+        
+        // 延迟关闭对话框
+        setTimeout(() => {
+            closeUnifiedProjectDialog();
+            showNotification(`项目 "${projectName}" 上传成功！共上传 ${files.length} 个文件`, 'success');
+        }, 1500);
+        
+    } catch (error) {
+        console.error('文件上传失败:', error);
+        showNotification('文件上传失败: ' + error.message, 'error');
+        showUploadProgress(false);
+    }
+}
+
+// 读取文件为文本
+function readFileAsText(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        
+        reader.onload = function(e) {
+            resolve(e.target.result);
+        };
+        
+        reader.onerror = function() {
+            reject(new Error('文件读取失败'));
+        };
+        
+        // 根据文件类型选择读取方式
+        if (isTextFile(file.name) || file.size < 1024 * 1024) { // 小于1MB的文件尝试作为文本读取
+            reader.readAsText(file, 'UTF-8');
+        } else {
+            // 大文件或二进制文件存储基本信息
+            resolve(`[二进制文件: ${file.name}, 大小: ${formatFileSize(file.size)}]`);
+        }
+    });
+}
+
+// 检查是否为文本文件
+function isTextFile(filename) {
+    const textExtensions = [
+        '.js', '.ts', '.jsx', '.tsx', '.py', '.java', '.c', '.cpp', '.h', '.hpp',
+        '.css', '.scss', '.sass', '.less', '.html', '.htm', '.xml', '.json', 
+        '.md', '.txt', '.sql', '.sh', '.bat', '.yml', '.yaml', '.toml', '.ini', 
+        '.cfg', '.conf', '.log', '.csv', '.php', '.rb', '.go', '.rs', '.kt',
+        '.swift', '.m', '.mm', '.vue', '.svelte', '.dockerfile', '.gitignore'
+    ];
+    
+    const ext = filename.toLowerCase().substring(filename.lastIndexOf('.'));
+    return textExtensions.includes(ext);
+}
+
+// 格式化文件大小
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// 生成项目结构
+function generateProjectStructure(files) {
+    const structure = [];
+    const dirMap = new Map();
+    
+    // 检测是否所有文件都有相同的根目录前缀
+    let commonRootPrefix = null;
+    if (files.length > 0) {
+        const allPaths = files.map(file => file.webkitRelativePath || file.name);
+        const firstPath = allPaths[0];
+        
+        // 检查是否有webkitRelativePath（表示是文件夹上传）
+        if (firstPath.includes('/')) {
+            const firstParts = firstPath.split('/');
+            const potentialRoot = firstParts[0];
+            
+            // 检查是否所有文件都以同样的根目录开始
+            const allHaveSameRoot = allPaths.every(path => {
+                const parts = path.split('/');
+                return parts.length > 1 && parts[0] === potentialRoot;
+            });
+            
+            if (allHaveSameRoot) {
+                commonRootPrefix = potentialRoot;
+                console.log('检测到公共根目录:', commonRootPrefix, '将跳过显示');
+            }
+        }
+    }
+    
+    // 从文件列表生成目录结构
+    for (const file of files) {
+        const filePath = file.webkitRelativePath || file.name;
+        let parts = filePath.split('/');
+        
+        // 如果检测到公共根目录，跳过它
+        if (commonRootPrefix && parts.length > 1 && parts[0] === commonRootPrefix) {
+            parts = parts.slice(1); // 移除根目录部分
+        }
+        
+        let currentLevel = structure;
+        let currentPath = '';
+        
+        for (let i = 0; i < parts.length; i++) {
+            const part = parts[i];
+            currentPath = currentPath ? `${currentPath}/${part}` : part;
+            
+            if (i === parts.length - 1) {
+                // 这是文件
+                currentLevel.push({
+                    name: part,
+                    type: 'file',
+                    path: currentPath,
+                    extension: getFileExtension(part),
+                    size: file.size
+                });
+            } else {
+                // 这是目录
+                let dir = currentLevel.find(item => item.name === part && item.type === 'directory');
+                if (!dir) {
+                    dir = {
+                        name: part,
+                        type: 'directory',
+                        path: currentPath,
+                        children: []
+                    };
+                    currentLevel.push(dir);
+                }
+                currentLevel = dir.children;
+            }
+        }
+    }
+    
+    return structure;
+}
+
+// 获取文件扩展名
+function getFileExtension(filename) {
+    const lastDot = filename.lastIndexOf('.');
+    return lastDot > 0 ? filename.substring(lastDot) : '';
+}
+
+// 显示/隐藏上传进度
+function showUploadProgress(show) {
+    const progressDiv = document.getElementById('uploadProgress');
+    if (progressDiv) {
+        progressDiv.style.display = show ? 'block' : 'none';
+    }
+}
+
+// 更新上传进度
+function updateProgress(percent, text, uploadedFiles, totalFiles, uploadedSize, totalSize) {
+    const progressFill = document.getElementById('progressFill');
+    const progressText = document.getElementById('progressText');
+    const progressPercent = document.getElementById('progressPercent');
+    const uploadedFilesSpan = document.getElementById('uploadedFiles');
+    const totalFilesSpan = document.getElementById('totalFiles');
+    const uploadedSizeSpan = document.getElementById('uploadedSize');
+    const totalSizeSpan = document.getElementById('totalSize');
+    
+    if (progressFill) progressFill.style.width = percent + '%';
+    if (progressText) progressText.textContent = text;
+    if (progressPercent) progressPercent.textContent = percent + '%';
+    if (uploadedFilesSpan) uploadedFilesSpan.textContent = uploadedFiles;
+    if (totalFilesSpan) totalFilesSpan.textContent = totalFiles;
+    if (uploadedSizeSpan) uploadedSizeSpan.textContent = formatFileSize(uploadedSize);
+    if (totalSizeSpan) totalSizeSpan.textContent = formatFileSize(totalSize);
+}
+
+// 设置项目管理器拖动功能
+function setupProjectManagerDrag() {
+    const projectManager = document.getElementById('projectManager');
+    const projectHeader = document.getElementById('projectHeader');
+    
+    if (!projectManager || !projectHeader) return;
+    
+    let isDragging = false;
+    let startX, startY, initialLeft, initialTop;
+    
+    // 监听拖动开始
+    projectHeader.addEventListener('mousedown', function(e) {
+        // 只有点击拖动手柄区域才能拖动
+        if (e.target === projectHeader || e.target.tagName === 'H3' || e.target.className.includes('fa-folder-open')) {
+            isDragging = true;
+            projectManager.classList.add('dragging');
+            
+            startX = e.clientX;
+            startY = e.clientY;
+            
+            const rect = projectManager.getBoundingClientRect();
+            initialLeft = rect.left;
+            initialTop = rect.top;
+            
+            // 设置为绝对定位
+            projectManager.style.position = 'fixed';
+            projectManager.style.left = initialLeft + 'px';
+            projectManager.style.top = initialTop + 'px';
+            projectManager.style.width = rect.width + 'px';
+            projectManager.style.zIndex = '1000';
+            
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+            
+            e.preventDefault();
+        }
+    });
+    
+    function handleMouseMove(e) {
+        if (!isDragging) return;
+        
+        const deltaX = e.clientX - startX;
+        const deltaY = e.clientY - startY;
+        
+        const newLeft = initialLeft + deltaX;
+        const newTop = initialTop + deltaY;
+        
+        // 限制在视窗范围内
+        const maxLeft = window.innerWidth - projectManager.offsetWidth;
+        const maxTop = window.innerHeight - projectManager.offsetHeight;
+        
+        const constrainedLeft = Math.max(0, Math.min(newLeft, maxLeft));
+        const constrainedTop = Math.max(0, Math.min(newTop, maxTop));
+        
+        projectManager.style.left = constrainedLeft + 'px';
+        projectManager.style.top = constrainedTop + 'px';
+    }
+    
+    function handleMouseUp() {
+        if (!isDragging) return;
+        
+        isDragging = false;
+        projectManager.classList.remove('dragging');
+        
+        // 保存位置到localStorage
+        const rect = projectManager.getBoundingClientRect();
+        localStorage.setItem('projectManagerPosition', JSON.stringify({
+            left: rect.left,
+            top: rect.top
+        }));
+        
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+    }
+    
+    // 恢复保存的位置
+    const savedPosition = localStorage.getItem('projectManagerPosition');
+    if (savedPosition) {
+        try {
+            const position = JSON.parse(savedPosition);
+            const rect = projectManager.getBoundingClientRect();
+            
+            // 确保位置在视窗范围内
+            const maxLeft = window.innerWidth - rect.width;
+            const maxTop = window.innerHeight - rect.height;
+            
+            const constrainedLeft = Math.max(0, Math.min(position.left, maxLeft));
+            const constrainedTop = Math.max(0, Math.min(position.top, maxTop));
+            
+            projectManager.style.position = 'fixed';
+            projectManager.style.left = constrainedLeft + 'px';
+            projectManager.style.top = constrainedTop + 'px';
+            projectManager.style.width = rect.width + 'px';
+            projectManager.style.zIndex = '1000';
+        } catch (e) {
+            console.warn('恢复项目管理器位置失败:', e);
+        }
+    }
+}
+
+// 设置模态框拖动功能
+function setupModalDragFunctionality() {
+    // 为所有模态框添加拖动功能
+    const modals = ['unifiedProjectModal', 'aiConfigModal', 'renameProjectModal'];
+    
+    modals.forEach(modalId => {
+        const modal = document.getElementById(modalId);
+        if (!modal) return;
+        
+        const modalContent = modal.querySelector('.modal-content');
+        const modalHeader = modal.querySelector('.modal-header');
+        
+        if (!modalContent || !modalHeader) return;
+        
+        let isDragging = false;
+        let startX, startY, initialLeft, initialTop;
+        
+        modalHeader.addEventListener('mousedown', function(e) {
+            // 只有点击标题栏才能拖动，避免点击按钮时触发拖动
+            if (e.target.closest('.close-modal') || e.target.closest('button')) {
+                return;
+            }
+            
+            isDragging = true;
+            modalContent.style.userSelect = 'none';
+            modalContent.classList.add('dragging');
+            
+            startX = e.clientX;
+            startY = e.clientY;
+            
+            const rect = modalContent.getBoundingClientRect();
+            initialLeft = rect.left;
+            initialTop = rect.top;
+            
+            // 确保模态框可以拖动
+            modalContent.style.position = 'fixed';
+            modalContent.style.left = initialLeft + 'px';
+            modalContent.style.top = initialTop + 'px';
+            modalContent.style.transform = 'none';
+            modalContent.style.zIndex = '1001';
+            
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+            
+            e.preventDefault();
+        });
+        
+        function handleMouseMove(e) {
+            if (!isDragging) return;
+            
+            const deltaX = e.clientX - startX;
+            const deltaY = e.clientY - startY;
+            
+            let newLeft = initialLeft + deltaX;
+            let newTop = initialTop + deltaY;
+            
+            // 限制在视窗范围内
+            const modalWidth = modalContent.offsetWidth;
+            const modalHeight = modalContent.offsetHeight;
+            
+            newLeft = Math.max(10, Math.min(newLeft, window.innerWidth - modalWidth - 10));
+            newTop = Math.max(10, Math.min(newTop, window.innerHeight - modalHeight - 10));
+            
+            modalContent.style.left = newLeft + 'px';
+            modalContent.style.top = newTop + 'px';
+        }
+        
+        function handleMouseUp() {
+            if (!isDragging) return;
+            
+            isDragging = false;
+            modalContent.style.userSelect = '';
+            modalContent.classList.remove('dragging');
+            
+            // 保存位置到localStorage
+            const rect = modalContent.getBoundingClientRect();
+            localStorage.setItem(`${modalId}Position`, JSON.stringify({
+                left: rect.left,
+                top: rect.top
+            }));
+            
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+        }
+        
+        // 恢复保存的位置（当模态框显示时调用）
+        modal.addEventListener('show', function() {
+            const savedPosition = localStorage.getItem(`${modalId}Position`);
+            if (savedPosition) {
+                try {
+                    const position = JSON.parse(savedPosition);
+                    
+                    // 确保位置在视窗范围内
+                    const modalWidth = modalContent.offsetWidth;
+                    const modalHeight = modalContent.offsetHeight;
+                    
+                    const constrainedLeft = Math.max(10, Math.min(position.left, window.innerWidth - modalWidth - 10));
+                    const constrainedTop = Math.max(10, Math.min(position.top, window.innerHeight - modalHeight - 10));
+                    
+                    modalContent.style.position = 'fixed';
+                    modalContent.style.left = constrainedLeft + 'px';
+                    modalContent.style.top = constrainedTop + 'px';
+                    modalContent.style.transform = 'none';
+                } catch (e) {
+                    console.warn(`恢复${modalId}位置失败:`, e);
+                }
+            }
+        });
+    });
 }

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI配置 - 代码可视化分析器</title>
+    <title>用户登录 - 代码可视化分析器</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         * {
@@ -22,44 +22,54 @@
             color: #333;
         }
 
-        .login-container {
+        .auth-container {
             background: rgba(255, 255, 255, 0.95);
             backdrop-filter: blur(10px);
             border-radius: 20px;
             box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
             padding: 40px;
-            min-width: 500px;
+            min-width: 550px;
             text-align: center;
         }
 
-        .login-header {
+        .auth-header {
             margin-bottom: 30px;
         }
 
-        .login-header h1 {
+        .auth-header h1 {
             color: #667eea;
             font-size: 2em;
             margin-bottom: 10px;
         }
 
-        .login-header p {
+        .auth-header p {
             color: #666;
             font-size: 1em;
         }
 
-        .security-notice {
-            background: #fff3cd;
-            border: 1px solid #ffeaa7;
-            color: #856404;
-            padding: 15px;
+        .auth-tabs {
+            display: flex;
+            margin-bottom: 30px;
             border-radius: 10px;
-            margin-bottom: 25px;
-            text-align: left;
+            overflow: hidden;
+            background: #f8f9fa;
         }
 
-        .security-notice i {
-            color: #f39c12;
-            margin-right: 8px;
+        .auth-tab {
+            flex: 1;
+            padding: 15px;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            color: #666;
+        }
+
+        .auth-tab.active {
+            background: #667eea;
+            color: white;
         }
 
         .form-group {
@@ -70,15 +80,15 @@
         .form-group label {
             display: block;
             margin-bottom: 8px;
-            color: #2c3e50;
             font-weight: 500;
+            color: #555;
         }
 
         .form-group input {
             width: 100%;
-            padding: 12px 15px;
+            padding: 12px;
             border: 2px solid #e9ecef;
-            border-radius: 10px;
+            border-radius: 8px;
             font-size: 1em;
             transition: border-color 0.3s ease;
         }
@@ -88,8 +98,24 @@
             border-color: #667eea;
         }
 
-        .api-presets {
-            margin-bottom: 20px;
+        .password-field {
+            position: relative;
+        }
+
+        .password-toggle {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: #666;
+            font-size: 1.1em;
+        }
+
+        .preset-section {
+            margin-bottom: 15px;
         }
 
         .preset-buttons {
@@ -100,10 +126,10 @@
 
         .preset-btn {
             flex: 1;
-            padding: 10px;
+            padding: 8px;
             border: 2px solid #e9ecef;
             background: white;
-            border-radius: 8px;
+            border-radius: 6px;
             cursor: pointer;
             transition: all 0.3s ease;
             font-size: 0.9em;
@@ -120,7 +146,7 @@
             color: white;
         }
 
-        .login-btn {
+        .auth-btn {
             width: 100%;
             background: linear-gradient(45deg, #667eea, #764ba2);
             color: white;
@@ -133,231 +159,480 @@
             margin-top: 10px;
         }
 
-        .login-btn:hover {
+        .auth-btn:hover {
             transform: translateY(-2px);
             box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
         }
 
-        .login-btn:disabled {
+        .auth-btn:disabled {
             opacity: 0.6;
             cursor: not-allowed;
             transform: none;
             box-shadow: none;
         }
 
-        .test-result {
+        .auth-result {
             margin-top: 15px;
             padding: 10px;
             border-radius: 8px;
             font-size: 0.9em;
+            display: none;
         }
 
-        .test-result.success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
+        .auth-result.success {
+            background: rgba(40, 167, 69, 0.1);
+            color: #28a745;
+            border: 1px solid rgba(40, 167, 69, 0.3);
         }
 
-        .test-result.error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
+        .auth-result.error {
+            background: rgba(220, 53, 69, 0.1);
+            color: #dc3545;
+            border: 1px solid rgba(220, 53, 69, 0.3);
+        }
+
+        .auth-result.info {
+            background: rgba(23, 162, 184, 0.1);
+            color: #17a2b8;
+            border: 1px solid rgba(23, 162, 184, 0.3);
         }
 
         .loading {
-            display: none;
-            color: #667eea;
-        }
-
-        .loading.show {
             display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #ffffff;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 8px;
         }
 
-        .features-info {
-            margin-top: 30px;
-            padding: 20px;
-            background: rgba(102, 126, 234, 0.1);
-            border-radius: 10px;
-            text-align: left;
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
 
-        .features-info h3 {
-            color: #667eea;
-            margin-bottom: 15px;
+        .hidden {
+            display: none;
         }
 
-        .features-info ul {
-            list-style: none;
-            padding: 0;
-        }
-
-        .features-info li {
-            margin-bottom: 8px;
-            padding-left: 20px;
-            position: relative;
-        }
-
-        .features-info li:before {
-            content: "✓";
-            position: absolute;
-            left: 0;
-            color: #4CAF50;
-            font-weight: bold;
+        .security-notice {
+            background: rgba(255, 193, 7, 0.1);
+            border: 1px solid rgba(255, 193, 7, 0.3);
+            color: #856404;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 0.9em;
         }
     </style>
 </head>
 <body>
-    <div class="login-container">
-        <div class="login-header">
-            <h1><i class="fas fa-robot"></i> AI配置</h1>
-            <p>配置您的AI API以使用代码分析功能</p>
+    <div class="auth-container">
+        <div class="auth-header">
+            <h1><i class="fas fa-code"></i> 代码可视化分析器</h1>
+            <p>请登录或注册以开始使用</p>
         </div>
 
-        <div class="security-notice">
-            <i class="fas fa-shield-alt"></i>
-            <strong>安全提示：</strong> 您的API密钥将安全存储在本地会话中，不会被上传到任何服务器。请确保使用可信的AI服务提供商。
+        <!-- 认证选项卡 -->
+        <div class="auth-tabs">
+            <button class="auth-tab active" data-tab="login">
+                <i class="fas fa-sign-in-alt"></i> 登录
+            </button>
+            <button class="auth-tab" data-tab="register">
+                <i class="fas fa-user-plus"></i> 注册
+            </button>
         </div>
 
-        <form id="aiConfigForm">
-            <div class="api-presets">
-                <label>快速选择AI服务:</label>
-                <div class="preset-buttons">
-                    <button type="button" class="preset-btn" data-url="https://api.deepseek.com/v1/chat/completions">
-                        <i class="fas fa-brain"></i><br>DeepSeek
-                    </button>
-                    <button type="button" class="preset-btn" data-url="https://api.openai.com/v1/chat/completions">
-                        <i class="fas fa-comment-dots"></i><br>OpenAI
-                    </button>
-                    <button type="button" class="preset-btn" data-url="">
-                        <i class="fas fa-cog"></i><br>自定义
+        <!-- 登录表单 - 四个字段：USER, PASSWORD, AI URL, AI KEYS -->
+        <form id="loginForm" class="auth-form">
+            <div class="form-group">
+                <label for="loginUsername"><i class="fas fa-user"></i> 用户名 (USER)</label>
+                <input type="text" id="loginUsername" name="username" 
+                       placeholder="请输入用户名" required minlength="3">
+            </div>
+            <div class="form-group">
+                <label for="loginPassword"><i class="fas fa-lock"></i> 密码 (PASSWORD)</label>
+                <div class="password-field">
+                    <input type="password" id="loginPassword" name="password" 
+                           placeholder="请输入密码" required minlength="6">
+                    <button type="button" class="password-toggle" onclick="togglePassword('loginPassword')">
+                        <i class="fas fa-eye" id="loginPasswordToggle"></i>
                     </button>
                 </div>
             </div>
-
-            <div class="form-group">
-                <label for="apiUrl">AI API URL:</label>
-                <input type="url" id="apiUrl" name="apiUrl" 
-                       placeholder="https://api.deepseek.com/v1/chat/completions" required>
+            
+            <!-- AI配置部分 -->
+            <div class="security-notice">
+                <i class="fas fa-robot"></i> <strong>AI服务配置：</strong>
+                首次登录时需要配置AI服务，之后将安全保存无需重复配置
             </div>
-
-            <div class="form-group">
-                <label for="apiKey">API Key:</label>
-                <input type="password" id="apiKey" name="apiKey" 
-                       placeholder="sk-..." required>
+            
+            <div id="aiConfigSection" class="ai-config-section">
+                <div class="preset-section">
+                    <label style="margin-bottom: 10px; display: block; font-weight: 500; color: #555;">
+                        <i class="fas fa-brain"></i> 选择AI服务预设
+                    </label>
+                    <div class="preset-buttons">
+                        <button type="button" class="preset-btn active" data-preset="deepseek">
+                            <i class="fas fa-brain"></i> DeepSeek
+                        </button>
+                        <button type="button" class="preset-btn" data-preset="openai">
+                            <i class="fas fa-openai"></i> OpenAI
+                        </button>
+                        <button type="button" class="preset-btn" data-preset="custom">
+                            <i class="fas fa-cog"></i> 自定义
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="loginApiUrl"><i class="fas fa-link"></i> AI API地址 (AI URL)</label>
+                    <input type="url" id="loginApiUrl" name="apiUrl" 
+                           placeholder="https://api.deepseek.com/v1/chat/completions" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="loginApiKey"><i class="fas fa-key"></i> AI API密钥 (AI KEYS)</label>
+                    <div class="password-field">
+                        <input type="password" id="loginApiKey" name="apiKey" 
+                               placeholder="请输入您的API密钥" required>
+                        <button type="button" class="password-toggle" onclick="togglePassword('loginApiKey')">
+                            <i class="fas fa-eye" id="loginApiKeyToggle"></i>
+                        </button>
+                    </div>
+                </div>
             </div>
-
-            <button type="submit" class="login-btn">
-                <span class="loading">
-                    <i class="fas fa-spinner fa-spin"></i> 验证中...
-                </span>
-                <span class="btn-text">验证并进入</span>
+            
+            <button type="submit" class="auth-btn" id="loginBtn">
+                <i class="fas fa-sign-in-alt"></i> 登录并配置AI
             </button>
-
-            <div id="testResult" class="test-result" style="display: none;"></div>
         </form>
 
-        <div class="features-info">
-            <h3><i class="fas fa-star"></i> 功能特性</h3>
-            <ul>
-                <li>智能代码分析和解释</li>
-                <li>代码质量审查和建议</li>
-                <li>自动生成技术文档</li>
-                <li>项目架构分析</li>
-                <li>模块分类和整理</li>
-            </ul>
-        </div>
+        <!-- 注册表单 - 两个字段：USER, PASSWORD -->
+        <form id="registerForm" class="auth-form hidden">
+            <div class="form-group">
+                <label for="registerUsername"><i class="fas fa-user"></i> 用户名 (USER)</label>
+                <input type="text" id="registerUsername" name="username" 
+                       placeholder="请输入用户名（至少3位）" required minlength="3">
+            </div>
+            <div class="form-group">
+                <label for="registerPassword"><i class="fas fa-lock"></i> 密码 (PASSWORD)</label>
+                <div class="password-field">
+                    <input type="password" id="registerPassword" name="password" 
+                           placeholder="请输入密码（至少6位）" required minlength="6">
+                    <button type="button" class="password-toggle" onclick="togglePassword('registerPassword')">
+                        <i class="fas fa-eye" id="registerPasswordToggle"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="confirmPassword"><i class="fas fa-lock"></i> 确认密码</label>
+                <div class="password-field">
+                    <input type="password" id="confirmPassword" name="confirmPassword" 
+                           placeholder="请再次输入密码" required minlength="6">
+                    <button type="button" class="password-toggle" onclick="togglePassword('confirmPassword')">
+                        <i class="fas fa-eye" id="confirmPasswordToggle"></i>
+                    </button>
+                </div>
+            </div>
+            <button type="submit" class="auth-btn" id="registerBtn">
+                <i class="fas fa-user-plus"></i> 注册
+            </button>
+        </form>
+
+        <!-- 结果显示 -->
+        <div id="authResult" class="auth-result"></div>
     </div>
 
     <script>
-        // AI配置表单处理
-        document.addEventListener('DOMContentLoaded', function() {
-            const form = document.getElementById('aiConfigForm');
-            const presetButtons = document.querySelectorAll('.preset-btn');
-            const apiUrlInput = document.getElementById('apiUrl');
-            const apiKeyInput = document.getElementById('apiKey');
-            const submitButton = form.querySelector('.login-btn');
-            const loading = submitButton.querySelector('.loading');
-            const btnText = submitButton.querySelector('.btn-text');
-            const testResult = document.getElementById('testResult');
-
-            // 预设按钮处理
-            presetButtons.forEach(button => {
-                button.addEventListener('click', function() {
-                    presetButtons.forEach(btn => btn.classList.remove('active'));
-                    this.classList.add('active');
-                    
-                    const url = this.dataset.url;
-                    if (url) {
-                        apiUrlInput.value = url;
-                    }
-                });
-            });
-
-            // 表单提交处理
-            form.addEventListener('submit', async function(e) {
-                e.preventDefault();
-                
-                const apiUrl = apiUrlInput.value.trim();
-                const apiKey = apiKeyInput.value.trim();
-                
-                if (!apiUrl || !apiKey) {
-                    showResult('请填写完整的API URL和API Key', 'error');
-                    return;
-                }
-
-                // 显示加载状态
-                submitButton.disabled = true;
-                loading.classList.add('show');
-                btnText.style.display = 'none';
-                testResult.style.display = 'none';
-
-                try {
-                    const response = await fetch('/api/ai-config', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ apiUrl, apiKey })
-                    });
-
-                    const data = await response.json();
-
-                    if (response.ok) {
-                        showResult('AI配置验证成功！正在跳转...', 'success');
-                        
-                        // 保存会话信息到localStorage
-                        localStorage.setItem('ai_session_token', data.sessionToken);
-                        localStorage.setItem('ai_config', JSON.stringify({
-                            apiUrl: data.config.apiUrl,
-                            lastValidated: data.config.lastValidated
-                        }));
-                        
-                        // 跳转到主页面
-                        setTimeout(() => {
-                            window.location.href = '/';
-                        }, 1500);
-                    } else {
-                        showResult(data.error + (data.details ? ': ' + data.details : ''), 'error');
-                    }
-                } catch (error) {
-                    showResult('连接失败: ' + error.message, 'error');
-                } finally {
-                    // 隐藏加载状态
-                    submitButton.disabled = false;
-                    loading.classList.remove('show');
-                    btnText.style.display = 'inline';
-                }
-            });
-
-            function showResult(message, type) {
-                testResult.textContent = message;
-                testResult.className = `test-result ${type}`;
-                testResult.style.display = 'block';
+        // AI预设配置
+        const presetConfigs = {
+            'deepseek': {
+                url: 'https://api.deepseek.com/v1/chat/completions',
+                placeholder: 'sk-...'
+            },
+            'openai': {
+                url: 'https://api.openai.com/v1/chat/completions',
+                placeholder: 'sk-...'
+            },
+            'custom': {
+                url: '',
+                placeholder: '请输入您的API密钥'
             }
+        };
 
-            // 默认选择DeepSeek
-            presetButtons[0].click();
+        // 标签页切换
+        document.querySelectorAll('.auth-tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                const targetTab = this.dataset.tab;
+                
+                // 更新标签页状态
+                document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+                this.classList.add('active');
+                
+                // 更新表单显示
+                document.querySelectorAll('.auth-form').forEach(form => form.classList.add('hidden'));
+                if (targetTab === 'login') {
+                    document.getElementById('loginForm').classList.remove('hidden');
+                } else {
+                    document.getElementById('registerForm').classList.remove('hidden');
+                }
+                
+                // 清除结果显示
+                showAuthResult('', '');
+            });
         });
+
+        // 预设按钮点击事件
+        document.querySelectorAll('.preset-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                
+                const preset = this.dataset.preset;
+                const config = presetConfigs[preset];
+                
+                document.getElementById('loginApiUrl').value = config.url;
+                document.getElementById('loginApiKey').placeholder = config.placeholder;
+            });
+        });
+
+        // 设置默认预设
+        document.querySelector('[data-preset="deepseek"]').click();
+
+        // 密码显示切换
+        function togglePassword(inputId) {
+            const input = document.getElementById(inputId);
+            const toggle = document.getElementById(inputId + 'Toggle');
+            
+            if (input.type === 'password') {
+                input.type = 'text';
+                toggle.className = 'fas fa-eye-slash';
+            } else {
+                input.type = 'password';
+                toggle.className = 'fas fa-eye';
+            }
+        }
+
+        // 显示认证结果
+        function showAuthResult(message, type) {
+            const resultDiv = document.getElementById('authResult');
+            if (message) {
+                resultDiv.textContent = message;
+                resultDiv.className = `auth-result ${type}`;
+                resultDiv.style.display = 'block';
+            } else {
+                resultDiv.style.display = 'none';
+            }
+        }
+
+        // 登录表单提交 - 智能AI配置处理
+        document.getElementById('loginForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const loginBtn = document.getElementById('loginBtn');
+            const originalText = loginBtn.innerHTML;
+            
+            try {
+                loginBtn.disabled = true;
+                loginBtn.innerHTML = '<span class="loading"></span>登录中...';
+                
+                const formData = new FormData(this);
+                const username = formData.get('username');
+                const password = formData.get('password');
+                
+                // 准备登录数据
+                const loginData = { username, password };
+                
+                // 检查是否需要AI配置
+                const aiConfigSection = document.getElementById('aiConfigSection');
+                if (aiConfigSection.style.display !== 'none') {
+                    const apiUrl = formData.get('apiUrl');
+                    const apiKey = formData.get('apiKey');
+                    
+                    if (!apiUrl || !apiKey) {
+                        throw new Error('首次登录需要配置AI服务');
+                    }
+                    
+                    loginData.aiConfig = { apiUrl, apiKey };
+                }
+                
+                // 执行登录
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(loginData)
+                });
+
+                const result = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(result.error || '登录失败');
+                }
+
+                // 保存会话信息
+                localStorage.setItem('authToken', result.token);
+                localStorage.setItem('user_info', JSON.stringify(result.user));
+                
+                // 保存AI配置（如果有）
+                if (result.aiConfig) {
+                    localStorage.setItem('aiConfig', JSON.stringify(result.aiConfig));
+                }
+                
+                showAuthResult('登录成功！正在进入应用...', 'success');
+                
+                // 跳转到主应用
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 1500);
+
+            } catch (error) {
+                console.error('登录失败:', error);
+                showAuthResult(error.message, 'error');
+            } finally {
+                loginBtn.disabled = false;
+                loginBtn.innerHTML = originalText;
+            }
+        });
+
+        // 注册表单提交 - 只处理用户注册
+        document.getElementById('registerForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const password = document.getElementById('registerPassword').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
+            
+            if (password !== confirmPassword) {
+                showAuthResult('两次输入的密码不一致', 'error');
+                return;
+            }
+            
+            const registerBtn = document.getElementById('registerBtn');
+            const originalText = registerBtn.innerHTML;
+            
+            try {
+                registerBtn.disabled = true;
+                registerBtn.innerHTML = '<span class="loading"></span>注册中...';
+                
+                const formData = new FormData(this);
+                const response = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        username: formData.get('username'),
+                        password: formData.get('password')
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showAuthResult(`注册成功！用户 ${data.username} 已创建，请切换到登录标签页`, 'success');
+                    
+                    // 清空注册表单
+                    this.reset();
+                    
+                    // 3秒后自动切换到登录标签页
+                    setTimeout(() => {
+                        document.querySelector('[data-tab="login"]').click();
+                        // 预填用户名
+                        document.getElementById('loginUsername').value = data.username;
+                    }, 3000);
+                } else {
+                    showAuthResult(data.error || '注册失败', 'error');
+                }
+            } catch (error) {
+                console.error('注册失败:', error);
+                showAuthResult('注册失败：网络错误', 'error');
+            } finally {
+                registerBtn.disabled = false;
+                registerBtn.innerHTML = originalText;
+            }
+        });
+
+        // 页面加载时检查是否已登录
+        window.addEventListener('load', function() {
+            const sessionToken = localStorage.getItem('ai_session_token');
+            const userInfo = localStorage.getItem('user_info');
+            
+            if (sessionToken && userInfo) {
+                try {
+                    const user = JSON.parse(userInfo);
+                    showAuthResult(`检测到已登录用户：${user.username}，请重新配置AI服务`, 'info');
+                    
+                    // 预填用户名
+                    document.getElementById('loginUsername').value = user.username;
+                } catch (error) {
+                    // 清除无效的登录信息
+                    localStorage.removeItem('ai_session_token');
+                    localStorage.removeItem('user_info');
+                }
+            }
+        });
+        
+        // 检查用户是否已配置AI
+        async function checkUserAiConfig() {
+            const username = document.getElementById('loginUsername').value;
+            if (!username || username.length < 3) return;
+            
+            try {
+                const response = await fetch('/api/users/check-ai-config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username })
+                });
+                
+                const result = await response.json();
+                const aiConfigSection = document.getElementById('aiConfigSection');
+                
+                if (result.hasAiConfig) {
+                    aiConfigSection.style.display = 'none';
+                    // 移除AI字段的required属性
+                    document.getElementById('loginApiUrl').removeAttribute('required');
+                    document.getElementById('loginApiKey').removeAttribute('required');
+                    
+                    // 显示提示信息
+                    const notice = document.querySelector('.security-notice');
+                    notice.innerHTML = '<i class="fas fa-check-circle"></i> <strong>AI配置已保存：</strong>无需重复配置，直接登录即可';
+                    notice.style.backgroundColor = '#d4edda';
+                    notice.style.borderColor = '#c3e6cb';
+                    notice.style.color = '#155724';
+                } else {
+                    aiConfigSection.style.display = 'block';
+                    // 添加AI字段的required属性
+                    document.getElementById('loginApiUrl').setAttribute('required', 'required');
+                    document.getElementById('loginApiKey').setAttribute('required', 'required');
+                    
+                    // 恢复提示信息
+                    const notice = document.querySelector('.security-notice');
+                    notice.innerHTML = '<i class="fas fa-robot"></i> <strong>AI服务配置：</strong>首次登录时需要配置AI服务，之后将安全保存无需重复配置';
+                    notice.style.backgroundColor = '#fff3cd';
+                    notice.style.borderColor = '#ffeaa7';
+                    notice.style.color = '#856404';
+                }
+            } catch (error) {
+                console.error('检查AI配置状态失败:', error);
+            }
+        }
+        
+        // 为用户名输入框添加事件监听器
+        document.getElementById('loginUsername').addEventListener('input', debounce(checkUserAiConfig, 500));
+        
+        // 防抖函数
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
     </script>
 </body>
 </html>

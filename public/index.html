@@ -19,9 +19,98 @@
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #e8f5e8;
             min-height: 100vh;
             color: #333;
+        }
+
+        /* 账户信息区域样式 */
+        .user-account-area {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 1001;
+        }
+
+        .user-avatar {
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+
+        .user-avatar:hover {
+            transform: scale(1.05);
+            box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4);
+        }
+
+        .user-avatar i {
+            font-size: 18px;
+        }
+
+        .user-menu {
+            position: absolute;
+            top: 55px;
+            left: 0;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+            min-width: 220px;
+            padding: 15px;
+            border: 1px solid #e9ecef;
+        }
+
+        .user-info {
+            padding-bottom: 12px;
+            border-bottom: 1px solid #e9ecef;
+            margin-bottom: 12px;
+        }
+
+        .user-name {
+            font-size: 16px;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 8px;
+        }
+
+        .ai-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #666;
+        }
+
+        .ai-status i {
+            color: #667eea;
+        }
+
+        .logout-btn {
+            width: 100%;
+            padding: 8px 12px;
+            background: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .logout-btn:hover {
+            background: #c82333;
+            transform: translateY(-1px);
         }
 
         .container {
@@ -150,6 +239,14 @@
         @keyframes spin {
             from { transform: rotate(0deg); }
             to { transform: rotate(360deg); }
+        }
+
+        .project-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            border-bottom: 1px solid #e9ecef;
         }
 
         .add-project-btn {
@@ -301,6 +398,9 @@
     max-width: 800px;
     max-height: 80vh;
     overflow: auto;
+    top: 10%;
+    left: 50%;
+    transform: translateX(-50%);
 }
 
         .modal-header {
@@ -311,7 +411,17 @@
     border-bottom: 2px solid #e9ecef;
     padding-bottom: 15px;
     cursor: move;
+    user-select: none;
 }
+
+        .modal-header:hover {
+            background: rgba(102, 126, 234, 0.05);
+        }
+
+        .modal-content.dragging {
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.4);
+            transform: rotate(1deg);
+        }
 
         .resize-handle {
     position: absolute;
@@ -330,16 +440,16 @@
     left: 50%;
     transform: translate(-50%, -50%);
     background: white;
-    padding: 30px;
+    padding: 45px;
     border-radius: 15px;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-    min-width: 400px;
-    width: 500px;
-    max-width: 800px;
+    min-width: 600px;
+    width: 750px;
+    max-width: 1200px;
     max-height: 80vh;
     overflow: auto;
     resize: both;
-    min-height: 400px;
+    min-height: 600px;
 }
 
 #aiConfigModal .modal-header {
@@ -745,10 +855,26 @@
             background: rgba(102, 126, 234, 0.05);
             margin-bottom: 15px;
             border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
 
         .tree-item[data-type="category"]:hover {
             background: rgba(102, 126, 234, 0.1);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+
+        .tree-item[data-type="category"] .tree-label {
+            font-size: 16px;
+            font-weight: 600;
+            border-bottom: 1px solid rgba(102, 126, 234, 0.2);
+            margin-bottom: 8px;
+        }
+
+        .tree-item[data-type="category"] .children {
+            padding-left: 20px;
+            padding-right: 10px;
+            padding-bottom: 10px;
         }
 
         .tree-label {
@@ -1249,10 +1375,370 @@
                 z-index: 1000;
             }
         }
+
+        /* 统一项目对话框样式 */
+        
+        /* 文件上传相关样式 */
+        .upload-info {
+            margin-bottom: 20px;
+        }
+        
+        .file-input-help {
+            margin-top: 8px;
+            font-size: 0.9em;
+            color: #666;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .file-input-help i {
+            color: #667eea;
+        }
+        
+        input[type="file"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px dashed #ddd;
+            border-radius: 8px;
+            background: #f8f9fa;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        input[type="file"]:hover {
+            border-color: #667eea;
+            background: #f0f2ff;
+        }
+        
+        .upload-progress {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+        
+        .progress-text {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+        
+        .upload-stats {
+            font-size: 0.9em;
+            color: #666;
+            text-align: center;
+        }
+        .project-options {
+            display: grid;
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .option-card {
+            border: 2px solid #e9ecef;
+            border-radius: 12px;
+            padding: 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .option-card:hover {
+            border-color: #667eea;
+            background: #f8f9ff;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.1);
+        }
+
+        .option-icon {
+            font-size: 2em;
+            color: #667eea;
+            min-width: 60px;
+            text-align: center;
+        }
+
+        .option-content h4 {
+            margin: 0 0 8px 0;
+            color: #333;
+            font-size: 1.1em;
+        }
+
+        .option-content p {
+            margin: 0 0 10px 0;
+            color: #666;
+            font-size: 0.9em;
+            line-height: 1.4;
+        }
+
+        .option-features {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .feature-tag {
+            background: #667eea;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 0.75em;
+            font-weight: 500;
+        }
+
+        .feature-tag:first-child {
+            background: #28a745;
+        }
+
+        .project-form-section {
+            margin-top: 20px;
+        }
+
+        .form-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e9ecef;
+        }
+
+        .form-header h4 {
+            margin: 0;
+            color: #333;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .back-btn {
+            background: #6c757d;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 0.85em;
+            transition: all 0.3s ease;
+        }
+
+        .back-btn:hover {
+            background: #5a6268;
+            transform: translateY(-1px);
+        }
+
+        .compatibility-check {
+            margin-bottom: 20px;
+        }
+
+        .info-box {
+            background: #e3f2fd;
+            border: 1px solid #2196F3;
+            border-radius: 8px;
+            padding: 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.9em;
+        }
+
+        .info-box.success {
+            background: #e8f5e8;
+            border-color: #28a745;
+            color: #155724;
+        }
+
+        .info-box.warning {
+            background: #fff3cd;
+            border-color: #ffc107;
+            color: #856404;
+        }
+
+        .local-file-actions {
+            text-align: center;
+        }
+
+        /* 本地文件管理器样式 */
+        .local-file-content {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .info-section {
+            margin-bottom: 30px;
+        }
+
+        .info-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+
+        .info-card i {
+            font-size: 1.5em;
+            margin-bottom: 10px;
+            display: block;
+        }
+
+        .info-card h4 {
+            margin: 10px 0;
+            font-size: 1.1em;
+        }
+
+        .info-card p {
+            margin: 0;
+            opacity: 0.9;
+            line-height: 1.5;
+        }
+
+        .compatibility-info {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+
+        .compatibility-info h5 {
+            margin: 0 0 10px 0;
+            color: #333;
+        }
+
+        .compatibility-info ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .compatibility-info li {
+            padding: 5px 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .local-file-btn {
+            background: linear-gradient(45deg, #28a745, #20c997);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(40, 167, 69, 0.3);
+            display: block;
+            margin: 20px auto;
+        }
+
+        .local-file-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(40, 167, 69, 0.4);
+        }
+
+        .local-file-btn i {
+            margin-right: 8px;
+        }
+
+        .selected-folder-info {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            border: 2px solid #28a745;
+            margin-top: 20px;
+        }
+
+        .selected-folder-info h5 {
+            margin: 0 0 15px 0;
+            color: #333;
+        }
+
+        .folder-details {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        .folder-name {
+            font-family: monospace;
+            background: #e9ecef;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            word-break: break-all;
+        }
+
+        .folder-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .action-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .action-btn:hover {
+            background: #5a67d8;
+            transform: translateY(-1px);
+        }
     </style>
 </head>
 <body>
     <div class="container">
+        <!-- 账户信息区域 -->
+        <div class="user-account-area">
+            <div class="user-avatar" id="userAvatarBtn" onclick="toggleUserMenu()">
+                <i class="fas fa-user"></i>
+            </div>
+            <div class="user-menu" id="userMenu" style="display: none;">
+                <div class="user-info">
+                    <div class="user-name" id="userName">加载中...</div>
+                    <div class="ai-status" id="aiStatus">
+                        <i class="fas fa-robot"></i>
+                        <span id="aiStatusText">检查中...</span>
+                    </div>
+                </div>
+                <div class="user-actions">
+                    <button class="logout-btn" onclick="logout()">
+                        <i class="fas fa-sign-out-alt"></i> 登出
+                    </button>
+                </div>
+            </div>
+        </div>
+        
         <div class="sidebar">
             <div class="sidebar-header">
                 <h1 onclick="location.reload()" style="cursor: pointer;"><i class="fas fa-code"></i> 代码分析器</h1>
@@ -1277,8 +1763,8 @@
             <div class="project-manager">
                 <div class="project-header">
                     <h3><i class="fas fa-folder-open"></i> 项目管理</h3>
-                    <button class="add-project-btn" onclick="showAddProjectDialog()">
-                        <i class="fas fa-plus"></i> 添加项目
+                    <button class="add-project-btn" onclick="showUnifiedProjectDialog()">
+                        <i class="fas fa-plus"></i> 添加本地文件项目
                     </button>
                 </div>
                 <div class="project-list" id="projectList">
@@ -1287,10 +1773,7 @@
             </div>
             
             <div class="tree-container" id="fileTree">
-                <div class="loading">
-                    <i class="fas fa-spinner"></i>
-                    正在加载项目结构...
-                </div>
+                <!-- 文件树将在这里动态生成 -->
             </div>
         </div>
 
@@ -1349,29 +1832,159 @@
         </div>
     </div>
 
-    <!-- 添加项目模态框 -->
-    <div id="addProjectModal" class="modal">
+    <!-- 统一的添加本地文件项目模态框 -->
+    <div id="unifiedProjectModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3><i class="fas fa-folder-plus"></i> 添加项目</h3>
-                <button class="close-modal" onclick="closeAddProjectDialog()">
+                <h3><i class="fas fa-folder-plus"></i> 添加本地文件项目</h3>
+                <button class="close-modal" onclick="closeUnifiedProjectDialog()">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
-            <form id="addProjectForm">
-                <div class="form-group">
-                    <label for="projectName">项目名称:</label>
-                    <input type="text" id="projectName" name="projectName" placeholder="输入项目名称" required>
+            
+            <div class="project-options">
+                <div class="option-card" onclick="selectProjectOption('upload')">
+                    <div class="option-icon">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                    </div>
+                    <div class="option-content">
+                        <h4>上传文件夹到服务器</h4>
+                        <p>将本地文件夹完整上传到服务器数据库中存储</p>
+                        <div class="option-features">
+                            <span class="feature-tag">推荐</span>
+                            <span class="feature-tag">持久存储</span>
+                            <span class="feature-tag">2GB上限</span>
+                        </div>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label for="projectPath">项目路径:</label>
-                    <input type="text" id="projectPath" name="projectPath" placeholder="/path/to/your/project" required>
+                
+                <div class="option-card" onclick="selectProjectOption('manual')">
+                    <div class="option-icon">
+                        <i class="fas fa-edit"></i>
+                    </div>
+                    <div class="option-content">
+                        <h4>手动添加项目信息</h4>
+                        <p>仅添加项目基本信息，不上传文件</p>
+                        <div class="option-features">
+                            <span class="feature-tag">快速创建</span>
+                        </div>
+                    </div>
                 </div>
-                <div class="modal-actions">
-                    <button type="button" class="btn btn-secondary" onclick="closeAddProjectDialog()">取消</button>
-                    <button type="submit" class="btn btn-primary">添加项目</button>
+            </div>
+            
+            <!-- 文件上传区域 -->
+            <div id="uploadFileSection" class="project-form-section" style="display: none;">
+                <div class="form-header">
+                    <h4><i class="fas fa-cloud-upload-alt"></i> 上传项目文件</h4>
+                    <button class="back-btn" onclick="resetProjectOptions()">
+                        <i class="fas fa-arrow-left"></i> 返回选择
+                    </button>
                 </div>
-            </form>
+                
+                <div class="upload-info">
+                    <div class="info-box">
+                        <i class="fas fa-info-circle"></i>
+                        <span>支持上传整个文件夹，文件将安全存储在服务器数据库中。上传限制：2GB</span>
+                    </div>
+                </div>
+                
+                <form id="uploadProjectForm" enctype="multipart/form-data">
+                    <div class="form-group">
+                        <label for="uploadProjectName"><i class="fas fa-tag"></i> 项目名称</label>
+                        <input type="text" id="uploadProjectName" name="projectName" 
+                               placeholder="请输入项目名称" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="projectFiles"><i class="fas fa-folder"></i> 选择文件夹</label>
+                        <input type="file" id="projectFiles" name="files" 
+                               webkitdirectory directory multiple required>
+                        <div class="file-input-help">
+                            <i class="fas fa-lightbulb"></i>
+                            <span>点击此处选择要上传的文件夹</span>
+                        </div>
+                    </div>
+                    
+                    <div id="uploadProgress" class="upload-progress" style="display: none;">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill"></div>
+                        </div>
+                        <div class="progress-text">
+                            <span id="progressText">准备上传...</span>
+                            <span id="progressPercent">0%</span>
+                        </div>
+                        <div class="upload-stats">
+                            <span id="uploadedFiles">0</span> / <span id="totalFiles">0</span> 文件
+                            (<span id="uploadedSize">0</span> / <span id="totalSize">0</span>)
+                        </div>
+                    </div>
+                    
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                            开始上传
+                        </button>
+                    </div>
+                </form>
+            </div>
+                <div class="form-header">
+                    <h4><i class="fas fa-hard-drive"></i> 本地文件夹访问</h4>
+                    <button class="back-btn" onclick="resetProjectOptions()">
+                        <i class="fas fa-arrow-left"></i> 返回选择
+                    </button>
+                </div>
+                
+                <div class="compatibility-check">
+                    <div id="compatibilityInfo" class="info-box">
+                        <i class="fas fa-info-circle"></i>
+                        <span>检查浏览器兼容性...</span>
+                    </div>
+                </div>
+                
+                <div class="local-file-actions">
+                    <button class="local-file-btn select-folder-btn" onclick="selectLocalFolder()">
+                        <i class="fas fa-folder-open"></i>
+                        选择本地文件夹
+                    </button>
+                    
+                    <div class="selected-folder-info" id="selectedFolderInfo" style="display: none;">
+                        <h5><i class="fas fa-check-circle" style="color: #28a745;"></i> 已选择文件夹</h5>
+                        <div class="folder-details">
+                            <div class="folder-name" id="selectedFolderName"></div>
+                            <div class="folder-actions">
+                                <button class="action-btn" onclick="loadAndCreateLocalProject()">
+                                    <i class="fas fa-magic"></i> 创建项目并加载结构
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 手动添加区域 -->
+            <div id="manualAddSection" class="project-form-section" style="display: none;">
+                <div class="form-header">
+                    <h4><i class="fas fa-edit"></i> 手动添加项目</h4>
+                    <button class="back-btn" onclick="resetProjectOptions()">
+                        <i class="fas fa-arrow-left"></i> 返回选择
+                    </button>
+                </div>
+                
+                <form id="manualProjectForm">
+                    <div class="form-group">
+                        <label for="projectName">项目名称:</label>
+                        <input type="text" id="projectName" name="projectName" placeholder="输入项目名称" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="projectPath">项目路径:</label>
+                        <input type="text" id="projectPath" name="projectPath" placeholder="/path/to/your/project" required>
+                    </div>
+                    <div class="modal-actions">
+                        <button type="button" class="btn btn-secondary" onclick="resetProjectOptions()">返回</button>
+                        <button type="submit" class="btn btn-primary">添加项目</button>
+                    </div>
+                </form>
+            </div>
         </div>
     </div>
 
