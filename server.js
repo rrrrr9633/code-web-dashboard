@@ -15,6 +15,9 @@ const PORT = 3000;
 const dbPath = path.join(__dirname, 'project_files.db');
 const db = new sqlite3.Database(dbPath);
 
+// 启用外键约束
+db.run("PRAGMA foreign_keys = ON");
+
 // 创建数据库表
 db.serialize(() => {
     // 用户表 - 新增
@@ -958,22 +961,46 @@ app.delete('/api/projects/:id', requireAuth, (req, res) => {
             
             const fileCount = row ? row.fileCount : 0;
             
-            // 从数据库删除项目（外键约束会自动删除相关文件）
-            db.run("DELETE FROM projects WHERE id = ? AND user_id = ?", [projectId, userId], function(err) {
+            // 先删除项目相关的文件记录
+            db.run("DELETE FROM project_files WHERE project_id = ?", [projectId], function(err) {
                 if (err) {
-                    console.error('删除项目失败:', err);
+                    console.error('删除项目文件失败:', err);
                     return res.status(500).json({ error: '删除项目失败' });
                 }
                 
-                if (this.changes === 0) {
-                    return res.status(404).json({ error: '项目不存在或无权限' });
-                }
-                
-                res.json({ 
-                    message: '项目已移除', 
-                    deletedFiles: fileCount 
+                // 然后删除项目结构记录
+                db.run("DELETE FROM project_structures WHERE project_id = ?", [projectId], function(err) {
+                    if (err) {
+                        console.error('删除项目结构失败:', err);
+                        return res.status(500).json({ error: '删除项目失败' });
+                    }
+                    
+                    // 删除项目重构配置
+                    db.run("DELETE FROM project_restructure_configs WHERE project_id = ?", [projectId], function(err) {
+                        if (err) {
+                            console.error('删除项目重构配置失败:', err);
+                            return res.status(500).json({ error: '删除项目失败' });
+                        }
+                        
+                        // 最后删除项目记录
+                        db.run("DELETE FROM projects WHERE id = ? AND user_id = ?", [projectId, userId], function(err) {
+                            if (err) {
+                                console.error('删除项目失败:', err);
+                                return res.status(500).json({ error: '删除项目失败' });
+                            }
+                            
+                            if (this.changes === 0) {
+                                return res.status(404).json({ error: '项目不存在或无权限' });
+                            }
+                            
+                            res.json({ 
+                                message: '项目已移除', 
+                                deletedFiles: fileCount 
+                            });
+                            console.log(`项目ID ${projectId} 已从数据库删除，同时删除了 ${fileCount} 个文件`);
+                        });
+                    });
                 });
-                console.log(`项目ID ${projectId} 已从数据库删除，同时删除了 ${fileCount} 个文件`);
             });
         });
     } catch (error) {
