@@ -1,0 +1,76 @@
+# Docker Compose 配置文件
+# 用于快速启动完整的应用环境
+
+version: '3.8'
+
+services:
+  # 主应用服务
+  code-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: code-web-dashboard
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      # 持久化数据库文件
+      - dashboard_data:/app/data
+      # 持久化上传的项目文件
+      - uploaded_projects:/app/uploads
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DB_PATH=/app/data/project_files.db
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - dashboard_network
+
+  # 可选：Nginx 反向代理（生产环境推荐）
+  nginx:
+    image: nginx:alpine
+    container_name: code-dashboard-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - code-dashboard
+    networks:
+      - dashboard_network
+    profiles:
+      - production
+
+  # 可选：数据库备份服务
+  backup:
+    image: alpine:latest
+    container_name: code-dashboard-backup
+    restart: unless-stopped
+    volumes:
+      - dashboard_data:/data:ro
+      - ./backups:/backups
+    command: sh -c "while true; do tar -czf /backups/backup-$(date +%Y%m%d_%H%M%S).tar.gz -C /data .; sleep 86400; done"
+    networks:
+      - dashboard_network
+    profiles:
+      - backup
+
+# 数据卷定义
+volumes:
+  dashboard_data:
+    driver: local
+  uploaded_projects:
+    driver: local
+
+# 网络定义
+networks:
+  dashboard_network:
+    driver: bridge

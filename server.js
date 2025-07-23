@@ -196,6 +196,36 @@ app.use(express.json({ limit: '2gb' })); // 增加JSON负载限制到2GB
 app.use(express.urlencoded({ limit: '2gb', extended: true })); // 增加URL编码限制到2GB
 app.use(express.static(path.join(__dirname, 'public')));
 
+// 健康检查端点 (Docker 容器化支持)
+app.get('/health', (req, res) => {
+    try {
+        // 检查数据库连接
+        db.get("SELECT 1", (err) => {
+            if (err) {
+                return res.status(503).json({ 
+                    status: 'unhealthy', 
+                    error: 'Database connection failed',
+                    timestamp: new Date().toISOString()
+                });
+            }
+            
+            res.status(200).json({ 
+                status: 'healthy',
+                uptime: process.uptime(),
+                timestamp: new Date().toISOString(),
+                memory: process.memoryUsage(),
+                version: require('./package.json').version
+            });
+        });
+    } catch (error) {
+        res.status(503).json({ 
+            status: 'unhealthy', 
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
 // 登录页面路由
 app.get('/login.html', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'login.html'));
@@ -2013,7 +2043,12 @@ app.get('/api/projects/:projectId/structure', (req, res) => {
 
 // 搜索文件和内容
 
+// 导出 app 实例，以便 Electron 可以使用
+module.exports = app;
 
-app.listen(PORT, () => {
-  console.log(`代码可视化分析器运行在 http://localhost:${PORT}`);
-});
+// 如果直接运行此文件，启动服务器
+if (require.main === module) {
+    app.listen(PORT, () => {
+        console.log(`代码可视化分析器运行在 http://localhost:${PORT}`);
+    });
+}

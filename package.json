@@ -1,11 +1,20 @@
 {
-  "name": "flowmq-code-viewer",
+  "name": "code-web-dashboard",
   "version": "1.0.0",
-  "description": "FlowMQ项目代码可视化界面",
-  "main": "server.js",
+  "description": "代码可视化仪表板 - 桌面应用",
+  "main": "main.js",
+  "homepage": "./",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "electron": "electron .",
+    "electron-dev": "NODE_ENV=development electron .",
+    "build": "electron-builder",
+    "build-linux": "electron-builder --linux",
+    "build-win": "electron-builder --win",
+    "build-mac": "electron-builder --mac",
+    "dist": "electron-builder --publish=never",
+    "pack": "electron-builder --dir"
   },
   "dependencies": {
     "axios": "^1.6.2",
@@ -19,13 +28,82 @@
     "sqlite3": "^5.1.7"
   },
   "devDependencies": {
+    "electron": "^37.2.3",
+    "electron-builder": "^26.0.12",
+    "electron-packager": "^17.1.2",
     "nodemon": "^3.0.2"
   },
   "keywords": [
-    "flowmq",
-    "code-viewer",
-    "visualization"
+    "代码可视化",
+    "仪表板", 
+    "electron",
+    "桌面应用"
   ],
-  "author": "FlowMQ Code Viewer",
-  "license": "MIT"
+  "author": {
+    "name": "代码可视化仪表板",
+    "email": "1179973615@qq.com"
+  },
+  "license": "MIT",
+  "build": {
+    "appId": "com.chen.code-web-dashboard",
+    "productName": "代码可视化仪表板",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "server.js",
+      "public/**/*",
+      "dbconfig/**/*",
+      "package.json",
+      "node_modules/**/*",
+      "!node_modules/.cache/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "project_files.db",
+        "to": "project_files.db"
+      }
+    ],
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        },
+        {
+          "target": "deb",
+          "arch": ["x64"]
+        }
+      ],
+      "category": "Development"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "category": "public.app-category.developer-tools"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
 }
