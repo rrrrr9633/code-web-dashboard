@@ -124,12 +124,101 @@
 
         .sidebar {
             width: 380px;
-            min-width: 380px;
+            min-width: 280px;
+            max-width: 600px;
             flex-shrink: 0;
             background: rgba(255, 255, 255, 0.95);
             backdrop-filter: blur(10px);
             border-right: 3px solid #e9ecef;
             overflow-y: auto;
+            position: relative;
+            transition: width 0.3s ease;
+        }
+
+        /* 侧边栏宽度调整手柄 */
+        .sidebar-resize-handle {
+            position: absolute;
+            top: 0;
+            right: -5px;
+            width: 10px;
+            height: 100%;
+            cursor: col-resize;
+            background: transparent;
+            z-index: 1000;
+            user-select: none;
+        }
+
+        .sidebar-resize-handle::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 3px;
+            height: 30px;
+            background: rgba(102, 126, 234, 0.4);
+            border-radius: 2px;
+            transition: all 0.3s ease;
+            opacity: 0;
+        }
+
+        .sidebar-resize-handle::after {
+            content: '⋮⋮';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 12px;
+            color: rgba(102, 126, 234, 0.6);
+            letter-spacing: -2px;
+            opacity: 0;
+            transition: all 0.3s ease;
+            pointer-events: none;
+            writing-mode: vertical-lr;
+        }
+
+        .sidebar-resize-handle:hover::before {
+            opacity: 1;
+            height: 50px;
+            background: rgba(102, 126, 234, 0.7);
+        }
+
+        .sidebar-resize-handle:hover::after {
+            opacity: 1;
+        }
+
+        .sidebar.resizing {
+            transition: none;
+            user-select: none;
+        }
+
+        .sidebar.resizing .sidebar-resize-handle::before {
+            opacity: 1;
+            height: 100%;
+            background: rgba(102, 126, 234, 0.6);
+        }
+
+        .sidebar.resizing .sidebar-resize-handle::after {
+            opacity: 1;
+        }
+
+        /* 响应式设计 - 移动端隐藏侧边栏调整大小功能 */
+        @media (max-width: 768px) {
+            .sidebar-resize-handle {
+                display: none;
+            }
+            
+            .sidebar {
+                width: 100% !important;
+                min-width: 100% !important;
+                max-width: 100% !important;
+            }
+        }
+
+        /* 确保在调整侧边栏宽度时页面布局正常 */
+        .container {
+            display: flex;
+            transition: none; /* 避免在拖拽时产生不必要的动画 */
         }
 
         .sidebar-header {
@@ -298,6 +387,48 @@
             background: linear-gradient(45deg, #667eea, #764ba2);
             color: white;
             border-color: #667eea;
+        }
+
+        /* 拖拽相关样式 */
+        .project-item.dragging {
+            opacity: 0.5;
+            transform: rotate(5deg);
+            z-index: 1000;
+        }
+
+        .project-item.drag-over {
+            border-color: #f39c12;
+            background: rgba(243, 156, 18, 0.1);
+            transform: translateX(8px);
+        }
+
+        .project-drag-handle {
+            display: flex;
+            align-items: center;
+            margin-right: 8px;
+            color: #999;
+            cursor: grab;
+            padding: 4px;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }
+
+        .project-drag-handle:hover {
+            background: rgba(102, 126, 234, 0.1);
+            color: #667eea;
+        }
+
+        .project-drag-handle:active {
+            cursor: grabbing;
+        }
+
+        .project-item.active .project-drag-handle {
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .project-item.active .project-drag-handle:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
         }
 
         .restructure-status {
@@ -838,6 +969,133 @@
 
         .tree-container {
             padding: 15px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            height: 400px;
+            min-height: 200px;
+            max-height: 800px;
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(10px);
+            border-radius: 0 0 12px 12px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-top: none;
+            transition: height 0.3s ease;
+        }
+
+        /* 文件树包装容器 */
+        .file-tree-wrapper {
+            position: relative;
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        /* 文件树头部 */
+        .file-tree-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(10px);
+            border-radius: 12px 12px 0 0;
+            border-bottom: 1px solid rgba(102, 126, 234, 0.1);
+        }
+
+        .file-tree-header h3 {
+            margin: 0;
+            color: #667eea;
+            font-size: 1.1em;
+            font-weight: 600;
+        }
+
+        .file-tree-header h3 i {
+            margin-right: 8px;
+            color: #667eea;
+        }
+
+        .file-tree-controls {
+            display: flex;
+            gap: 8px;
+        }
+
+        .tree-control-btn {
+            background: rgba(102, 126, 234, 0.1);
+            border: 1px solid rgba(102, 126, 234, 0.2);
+            border-radius: 6px;
+            padding: 6px 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 0.9em;
+            color: #667eea;
+        }
+
+        .tree-control-btn:hover {
+            background: rgba(102, 126, 234, 0.2);
+            border-color: rgba(102, 126, 234, 0.3);
+            transform: translateY(-1px);
+        }
+
+        /* 文件树调整大小手柄 */
+        .tree-resize-handle {
+            position: absolute;
+            bottom: -5px;
+            left: 0;
+            right: 0;
+            height: 10px;
+            cursor: row-resize;
+            background: transparent;
+            z-index: 100;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .resize-indicator {
+            width: 40px;
+            height: 6px;
+            background: rgba(102, 126, 234, 0.3);
+            border-radius: 3px;
+            transition: all 0.3s ease;
+            opacity: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .resize-indicator i {
+            font-size: 10px;
+            color: rgba(102, 126, 234, 0.6);
+        }
+
+        .tree-resize-handle:hover .resize-indicator {
+            opacity: 1;
+            background: rgba(102, 126, 234, 0.5);
+            width: 60px;
+            height: 8px;
+        }
+
+        .tree-resize-handle:hover .resize-indicator i {
+            color: rgba(102, 126, 234, 0.8);
+        }
+
+        /* 调整大小时的样式 */
+        .file-tree-wrapper.resizing {
+            user-select: none;
+        }
+
+        .file-tree-wrapper.resizing .tree-container {
+            transition: none;
+        }
+
+        .file-tree-wrapper.resizing .resize-indicator {
+            opacity: 1;
+            background: rgba(102, 126, 234, 0.7);
+            width: 80px;
+            height: 10px;
         }
 
         .tree-item {
@@ -918,7 +1176,7 @@
 
         .main-content {
             flex: 1;
-            min-width: 900px;
+            min-width: 0; /* 允许内容收缩以适应侧边栏宽度变化 */
             display: flex;
             flex-direction: column;
             background: #f8f9fa;
@@ -1772,9 +2030,33 @@
                 </div>
             </div>
             
-            <div class="tree-container" id="fileTree">
-                <!-- 文件树将在这里动态生成 -->
+            <div class="file-tree-wrapper">
+                <div class="file-tree-header">
+                    <h3><i class="fas fa-sitemap"></i> 文件结构</h3>
+                    <div class="file-tree-controls">
+                        <button class="tree-control-btn" onclick="expandAllFolders()" title="展开所有文件夹">
+                            <i class="fas fa-plus-square"></i>
+                        </button>
+                        <button class="tree-control-btn" onclick="collapseAllFolders()" title="折叠所有文件夹">
+                            <i class="fas fa-minus-square"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="tree-container" id="fileTree">
+                    <!-- 文件树将在这里动态生成 -->
+                </div>
+                
+                <!-- 文件树调整大小手柄 -->
+                <div class="tree-resize-handle" id="treeResizeHandle" title="拖拽调整文件树高度 | 双击重置默认高度">
+                    <div class="resize-indicator">
+                        <i class="fas fa-grip-lines"></i>
+                    </div>
+                </div>
             </div>
+            
+            <!-- 侧边栏宽度调整手柄 -->
+            <div class="sidebar-resize-handle" id="sidebarResizeHandle" title="拖拽调整侧边栏宽度 | 双击重置默认宽度"></div>
         </div>
 
         <div class="main-content">

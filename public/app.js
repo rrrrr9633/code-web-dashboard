@@ -25,6 +25,8 @@ document.addEventListener('DOMContentLoaded', function() {
     loadUserInfo(); // 加载用户信息
     setupProjectManagerDrag(); // 设置项目管理器拖动
     setupModalDragFunctionality(); // 设置模态框拖动功能
+    setupFileTreeResize(); // 设置文件树调整大小功能
+    setupSidebarResize(); // 设置侧边栏调整大小功能
     
     // 显示数据库持久化提示
     showPersistenceNotification();
@@ -129,6 +131,8 @@ async function loadProjects() {
         });
         if (response.ok) {
             projects = await response.json();
+            // 恢复项目排序
+            loadProjectOrder();
         } else {
             // 如果API不可用，初始化空项目列表
             projects = [];
@@ -185,8 +189,17 @@ function renderProjectList() {
         return;
     }
     
-    projectList.innerHTML = projects.map(project => `
-        <div class="project-item ${currentProject && currentProject.id === project.id ? 'active' : ''}" onclick="selectProject('${project.id}')">
+    projectList.innerHTML = projects.map((project, index) => `
+        <div class="project-item ${currentProject && currentProject.id === project.id ? 'active' : ''}" 
+             data-project-id="${project.id}"
+             data-project-index="${index}"
+             onclick="selectProject('${project.id}')">
+            <div class="project-drag-handle" 
+                 draggable="true"
+                 title="拖动排序"
+                 onmousedown="event.stopPropagation()">
+                <i class="fas fa-grip-vertical"></i>
+            </div>
             <div class="project-info">
                 <i class="fas fa-folder"></i>
                 <div>
@@ -207,6 +220,9 @@ function renderProjectList() {
             </div>
         </div>
     `).join('');
+    
+    // 重新设置拖拽事件监听器
+    setupProjectDragAndDrop();
 }
 
 // 选择项目
@@ -3284,17 +3300,454 @@ function setupModalDragFunctionality() {
                     const modalWidth = modalContent.offsetWidth;
                     const modalHeight = modalContent.offsetHeight;
                     
-                    const constrainedLeft = Math.max(10, Math.min(position.left, window.innerWidth - modalWidth - 10));
-                    const constrainedTop = Math.max(10, Math.min(position.top, window.innerHeight - modalHeight - 10));
+                    // 计算有效位置
+                    const validLeft = Math.max(0, Math.min(position.left, window.innerWidth - modalWidth));
+                    const validTop = Math.max(0, Math.min(position.top, window.innerHeight - modalHeight));
                     
-                    modalContent.style.position = 'fixed';
-                    modalContent.style.left = constrainedLeft + 'px';
-                    modalContent.style.top = constrainedTop + 'px';
-                    modalContent.style.transform = 'none';
+                    modalContent.style.left = validLeft + 'px';
+                    modalContent.style.top = validTop + 'px';
                 } catch (e) {
-                    console.warn(`恢复${modalId}位置失败:`, e);
+                    console.warn('恢复模态框位置失败:', e);
                 }
             }
         });
     });
+}
+
+// ======================== 项目拖拽排序功能 ========================
+
+let draggedProjectIndex = null;
+let draggedProjectElement = null;
+
+// 设置项目拖拽和放置功能
+function setupProjectDragAndDrop() {
+    const projectItems = document.querySelectorAll('.project-item');
+    const dragHandles = document.querySelectorAll('.project-drag-handle');
+    
+    console.log('设置拖拽事件 - 项目数量:', projectItems.length, '拖拽手柄数量:', dragHandles.length);
+    
+    // 为拖拽手柄设置拖拽开始事件
+    dragHandles.forEach((handle, index) => {
+        console.log(`设置拖拽手柄 ${index}:`, handle);
+        handle.addEventListener('dragstart', handleDragStart);
+        handle.addEventListener('dragend', handleDragEnd);
+    });
+    
+    // 为项目元素设置拖拽目标事件
+    projectItems.forEach((item, index) => {
+        console.log(`设置项目拖拽目标 ${index}:`, item.dataset.projectIndex);
+        item.addEventListener('dragover', handleDragOver);
+        item.addEventListener('drop', handleDrop);
+        item.addEventListener('dragenter', handleDragEnter);
+        item.addEventListener('dragleave', handleDragLeave);
+    });
+    
+    console.log('拖拽事件设置完成');
+}
+
+// 开始拖拽
+function handleDragStart(e) {
+    console.log('拖拽开始事件触发，目标元素:', e.target, '当前目标:', e.currentTarget);
+    
+    // 获取拖拽手柄的父级项目元素
+    const projectElement = e.currentTarget.closest('.project-item');
+    if (!projectElement) {
+        console.log('拖拽开始失败 - 找不到项目元素');
+        return;
+    }
+    
+    draggedProjectElement = projectElement;
+    draggedProjectIndex = parseInt(projectElement.dataset.projectIndex);
+    
+    console.log('拖拽开始成功 - 项目索引:', draggedProjectIndex, '项目数据:', projectElement.dataset);
+    
+    // 设置拖拽效果
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/html', projectElement.outerHTML);
+    
+    // 添加拖拽样式
+    projectElement.style.opacity = '0.5';
+    projectElement.classList.add('dragging');
+    
+    console.log('开始拖拽项目:', projects[draggedProjectIndex]?.name, '索引:', draggedProjectIndex);
+}
+
+// 拖拽过程中
+function handleDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    return false;
+}
+
+// 进入拖拽目标
+function handleDragEnter(e) {
+    e.preventDefault();
+    const targetElement = e.currentTarget;
+    
+    if (targetElement !== draggedProjectElement) {
+        targetElement.classList.add('drag-over');
+    }
+}
+
+// 离开拖拽目标
+function handleDragLeave(e) {
+    e.currentTarget.classList.remove('drag-over');
+}
+
+// 放置
+function handleDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    const targetElement = e.currentTarget;
+    const targetIndex = parseInt(targetElement.dataset.projectIndex);
+    
+    console.log('拖拽放置 - 目标索引:', targetIndex, '拖拽索引:', draggedProjectIndex);
+    
+    targetElement.classList.remove('drag-over');
+    
+    if (draggedProjectIndex !== null && targetIndex !== null && targetIndex !== draggedProjectIndex) {
+        console.log('执行排序操作...');
+        
+        // 重新排序项目数组
+        const draggedProject = projects[draggedProjectIndex];
+        console.log('拖拽的项目:', draggedProject?.name);
+        
+        // 创建新的项目数组
+        const newProjects = [...projects];
+        
+        // 从原位置移除拖拽的项目
+        newProjects.splice(draggedProjectIndex, 1);
+        
+        // 计算正确的插入位置
+        let insertIndex = targetIndex;
+        if (draggedProjectIndex < targetIndex) {
+            // 往下拖动时，目标索引需要减1（因为已经移除了拖拽项目）
+            insertIndex = targetIndex - 1;
+        }
+        
+        // 插入到新位置
+        newProjects.splice(insertIndex, 0, draggedProject);
+        
+        console.log('项目重新排序:', draggedProject.name, '从索引', draggedProjectIndex, '移动到', insertIndex);
+        console.log('新的项目顺序:', newProjects.map((p, i) => `${i}: ${p.name}`));
+        
+        // 更新全局项目数组
+        projects.splice(0, projects.length, ...newProjects);
+        
+        // 保存新的排序到本地存储
+        saveProjectOrder();
+        
+        // 重新渲染项目列表
+        renderProjectList();
+        
+        // 显示成功通知
+        showNotification(`项目 "${draggedProject.name}" 已重新排序`, 'success');
+    } else {
+        console.log('排序条件不满足:', {
+            draggedProjectIndex,
+            targetIndex,
+            same: targetIndex === draggedProjectIndex
+        });
+    }
+    
+    return false;
+}
+
+// 拖拽结束
+function handleDragEnd(e) {
+    // 获取拖拽手柄的父级项目元素
+    const projectElement = e.currentTarget.closest('.project-item');
+    if (projectElement) {
+        // 清理拖拽状态
+        projectElement.style.opacity = '1';
+        projectElement.classList.remove('dragging');
+    }
+    
+    // 清理所有拖拽相关的样式
+    document.querySelectorAll('.project-item').forEach(item => {
+        item.classList.remove('drag-over');
+    });
+    
+    draggedProjectIndex = null;
+    draggedProjectElement = null;
+}
+
+// 保存项目排序到本地存储
+function saveProjectOrder() {
+    try {
+        const projectOrder = projects.map(project => project.id);
+        localStorage.setItem('projectOrder', JSON.stringify(projectOrder));
+        console.log('项目排序已保存到本地存储:', projectOrder);
+    } catch (error) {
+        console.error('保存项目排序失败:', error);
+    }
+}
+
+// 加载项目排序从本地存储
+function loadProjectOrder() {
+    try {
+        const savedOrder = localStorage.getItem('projectOrder');
+        if (savedOrder) {
+            const projectOrder = JSON.parse(savedOrder);
+            
+            // 根据保存的顺序重新排序项目数组
+            const reorderedProjects = [];
+            
+            // 首先添加按保存顺序排列的项目
+            projectOrder.forEach(projectId => {
+                const project = projects.find(p => p.id === projectId);
+                if (project) {
+                    reorderedProjects.push(project);
+                }
+            });
+            
+            // 然后添加不在保存顺序中的新项目
+            projects.forEach(project => {
+                if (!projectOrder.includes(project.id)) {
+                    reorderedProjects.push(project);
+                }
+            });
+            
+            projects = reorderedProjects;
+            console.log('已从本地存储恢复项目排序');
+        }
+    } catch (error) {
+        console.error('加载项目排序失败:', error);
+    }
+}
+
+// ============= 文件树调整大小功能 =============
+
+// 设置文件树调整大小功能
+function setupFileTreeResize() {
+    const resizeHandle = document.getElementById('treeResizeHandle');
+    const treeContainer = document.getElementById('fileTree');
+    const treeWrapper = document.querySelector('.file-tree-wrapper');
+    
+    if (!resizeHandle || !treeContainer || !treeWrapper) {
+        console.log('文件树调整大小元素未找到，跳过初始化');
+        return;
+    }
+
+    let isResizing = false;
+    let startY = 0;
+    let startHeight = 0;
+
+    // 从localStorage加载保存的高度
+    const savedHeight = localStorage.getItem('fileTreeHeight');
+    if (savedHeight) {
+        treeContainer.style.height = savedHeight + 'px';
+        console.log('已从本地存储恢复文件树高度:', savedHeight);
+    }
+
+    // 鼠标按下开始拖拽
+    resizeHandle.addEventListener('mousedown', function(e) {
+        isResizing = true;
+        startY = e.clientY;
+        startHeight = parseInt(document.defaultView.getComputedStyle(treeContainer).height, 10);
+        
+        treeWrapper.classList.add('resizing');
+        document.body.style.cursor = 'row-resize';
+        document.body.style.userSelect = 'none';
+        
+        console.log('开始调整文件树大小:', startHeight);
+        
+        e.preventDefault();
+    });
+
+    // 鼠标移动时调整大小
+    document.addEventListener('mousemove', function(e) {
+        if (!isResizing) return;
+
+        const currentY = e.clientY;
+        const deltaY = currentY - startY;
+        const newHeight = startHeight + deltaY;
+        
+        // 限制最小和最大高度
+        const minHeight = 200;
+        const maxHeight = Math.min(800, window.innerHeight * 0.6); // 最大不超过屏幕高度的60%
+        
+        if (newHeight >= minHeight && newHeight <= maxHeight) {
+            treeContainer.style.height = newHeight + 'px';
+        }
+        
+        e.preventDefault();
+    });
+
+    // 鼠标松开结束拖拽
+    document.addEventListener('mouseup', function(e) {
+        if (isResizing) {
+            isResizing = false;
+            treeWrapper.classList.remove('resizing');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            
+            // 保存新的高度到localStorage
+            const currentHeight = parseInt(treeContainer.style.height, 10);
+            localStorage.setItem('fileTreeHeight', currentHeight);
+            
+            console.log('文件树大小调整完成:', currentHeight);
+            showNotification(`文件树高度已调整为 ${currentHeight}px`, 'success');
+        }
+    });
+
+    // 双击重置到默认高度
+    resizeHandle.addEventListener('dblclick', function() {
+        const defaultHeight = 400;
+        treeContainer.style.height = defaultHeight + 'px';
+        localStorage.setItem('fileTreeHeight', defaultHeight);
+        
+        showNotification('文件树高度已重置为默认值', 'success');
+        console.log('文件树高度重置为默认值:', defaultHeight);
+    });
+
+    // 窗口大小改变时调整最大高度限制
+    window.addEventListener('resize', function() {
+        const currentHeight = parseInt(treeContainer.style.height, 10);
+        const maxHeight = Math.min(800, window.innerHeight * 0.6);
+        
+        if (currentHeight > maxHeight) {
+            treeContainer.style.height = maxHeight + 'px';
+            localStorage.setItem('fileTreeHeight', maxHeight);
+        }
+    });
+
+    console.log('文件树调整大小功能已初始化');
+}
+
+// 展开所有文件夹
+function expandAllFolders() {
+    const allFolders = document.querySelectorAll('.tree-item[data-type="directory"]');
+    allFolders.forEach(folder => {
+        const childrenDiv = folder.querySelector('.children');
+        const icon = folder.querySelector('.folder-icon');
+        
+        if (childrenDiv && !childrenDiv.classList.contains('open')) {
+            childrenDiv.classList.add('open');
+            if (icon) {
+                icon.classList.remove('fa-folder');
+                icon.classList.add('fa-folder-open');
+            }
+        }
+    });
+    
+    showNotification('已展开所有文件夹', 'success');
+}
+
+// 折叠所有文件夹
+function collapseAllFolders() {
+    const allFolders = document.querySelectorAll('.tree-item[data-type="directory"]');
+    allFolders.forEach(folder => {
+        const childrenDiv = folder.querySelector('.children');
+        const icon = folder.querySelector('.folder-icon');
+        
+        if (childrenDiv && childrenDiv.classList.contains('open')) {
+            childrenDiv.classList.remove('open');
+            if (icon) {
+                icon.classList.remove('fa-folder-open');
+                icon.classList.add('fa-folder');
+            }
+        }
+    });
+    
+    showNotification('已折叠所有文件夹', 'success');
+}
+
+// ============= 侧边栏宽度调整功能 =============
+
+// 设置侧边栏宽度调整功能
+function setupSidebarResize() {
+    const resizeHandle = document.getElementById('sidebarResizeHandle');
+    const sidebar = document.querySelector('.sidebar');
+    
+    if (!resizeHandle || !sidebar) {
+        console.log('侧边栏调整大小元素未找到，跳过初始化');
+        return;
+    }
+
+    let isResizing = false;
+    let startX = 0;
+    let startWidth = 0;
+
+    // 从localStorage加载保存的宽度
+    const savedWidth = localStorage.getItem('sidebarWidth');
+    if (savedWidth) {
+        sidebar.style.width = savedWidth + 'px';
+        console.log('已从本地存储恢复侧边栏宽度:', savedWidth);
+    }
+
+    // 鼠标按下开始拖拽
+    resizeHandle.addEventListener('mousedown', function(e) {
+        isResizing = true;
+        startX = e.clientX;
+        startWidth = parseInt(document.defaultView.getComputedStyle(sidebar).width, 10);
+        
+        sidebar.classList.add('resizing');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        
+        console.log('开始调整侧边栏宽度:', startWidth);
+        
+        e.preventDefault();
+    });
+
+    // 鼠标移动时调整大小
+    document.addEventListener('mousemove', function(e) {
+        if (!isResizing) return;
+
+        const currentX = e.clientX;
+        const deltaX = currentX - startX;
+        const newWidth = startWidth + deltaX;
+        
+        // 限制最小和最大宽度
+        const minWidth = 280;
+        const maxWidth = Math.min(800, window.innerWidth * 0.6); // 最大不超过屏幕宽度的60%
+        
+        if (newWidth >= minWidth && newWidth <= maxWidth) {
+            sidebar.style.width = newWidth + 'px';
+        }
+        
+        e.preventDefault();
+    });
+
+    // 鼠标松开结束拖拽
+    document.addEventListener('mouseup', function(e) {
+        if (isResizing) {
+            isResizing = false;
+            sidebar.classList.remove('resizing');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            
+            // 保存新的宽度到localStorage
+            const currentWidth = parseInt(sidebar.style.width, 10);
+            localStorage.setItem('sidebarWidth', currentWidth);
+            
+            console.log('侧边栏宽度调整完成:', currentWidth);
+            showNotification(`侧边栏宽度已调整为 ${currentWidth}px`, 'success');
+        }
+    });
+
+    // 双击重置到默认宽度
+    resizeHandle.addEventListener('dblclick', function() {
+        const defaultWidth = 380;
+        sidebar.style.width = defaultWidth + 'px';
+        localStorage.setItem('sidebarWidth', defaultWidth);
+        
+        showNotification('侧边栏宽度已重置为默认值', 'success');
+        console.log('侧边栏宽度重置为默认值:', defaultWidth);
+    });
+
+    // 窗口大小改变时调整最大宽度限制
+    window.addEventListener('resize', function() {
+        const currentWidth = parseInt(sidebar.style.width, 10);
+        const maxWidth = Math.min(800, window.innerWidth * 0.6);
+        
+        if (currentWidth > maxWidth) {
+            sidebar.style.width = maxWidth + 'px';
+            localStorage.setItem('sidebarWidth', maxWidth);
+        }
+    });
+
+    console.log('侧边栏宽度调整功能已初始化');
 }
