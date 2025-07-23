@@ -1683,7 +1683,7 @@ function initModalResize(modal) {
         const newHeight = startHeight + (e.clientY - startY);
         
         // 设置最小尺寸限制
-        if (newWidth > 400 && newHeight > 300) {
+        if (newWidth > 600 && newHeight > 450) { // 400px * 1.5 = 600px, 300px * 1.5 = 450px
             modalContent.style.width = newWidth + 'px';
             modalContent.style.height = newHeight + 'px';
         }
@@ -2141,8 +2141,8 @@ function initAiPanelResizable() {
     document.addEventListener('mousemove', (e) => {
         if (!isResizing) return;
         // 计算新尺寸
-        const newWidth = Math.max(300, startWidth + (e.clientX - startX));
-        const newHeight = Math.max(400, startHeight + (e.clientY - startY));
+        const newWidth = Math.max(450, startWidth + (e.clientX - startX)); // 300px * 1.5 = 450px
+        const newHeight = Math.max(600, startHeight + (e.clientY - startY)); // 400px * 1.5 = 600px
         // 设置新尺寸
         aiPanel.style.width = `${newWidth}px`;
         aiPanel.style.height = `${newHeight}px`;
@@ -3565,8 +3565,8 @@ function setupFileTreeResize() {
         const newHeight = startHeight + deltaY;
         
         // 限制最小和最大高度
-        const minHeight = 200;
-        const maxHeight = Math.min(800, window.innerHeight * 0.6); // 最大不超过屏幕高度的60%
+        const minHeight = 400; // 200px * 2 = 400px
+        const maxHeight = Math.min(1600, window.innerHeight * 0.6); // 800px * 2 = 1600px
         
         if (newHeight >= minHeight && newHeight <= maxHeight) {
             treeContainer.style.height = newHeight + 'px';
@@ -3594,7 +3594,7 @@ function setupFileTreeResize() {
 
     // 双击重置到默认高度
     resizeHandle.addEventListener('dblclick', function() {
-        const defaultHeight = 400;
+        const defaultHeight = 800; // 400px * 2 = 800px
         treeContainer.style.height = defaultHeight + 'px';
         localStorage.setItem('fileTreeHeight', defaultHeight);
         
@@ -3605,7 +3605,7 @@ function setupFileTreeResize() {
     // 窗口大小改变时调整最大高度限制
     window.addEventListener('resize', function() {
         const currentHeight = parseInt(treeContainer.style.height, 10);
-        const maxHeight = Math.min(800, window.innerHeight * 0.6);
+        const maxHeight = Math.min(1600, window.innerHeight * 0.6); // 800px * 2 = 1600px
         
         if (currentHeight > maxHeight) {
             treeContainer.style.height = maxHeight + 'px';
@@ -3701,8 +3701,8 @@ function setupSidebarResize() {
         const newWidth = startWidth + deltaX;
         
         // 限制最小和最大宽度
-        const minWidth = 280;
-        const maxWidth = Math.min(800, window.innerWidth * 0.6); // 最大不超过屏幕宽度的60%
+        const minWidth = 420; // 280px * 1.5 = 420px
+        const maxWidth = Math.min(1200, window.innerWidth * 0.6); // 800px * 1.5 = 1200px
         
         if (newWidth >= minWidth && newWidth <= maxWidth) {
             sidebar.style.width = newWidth + 'px';
@@ -3730,7 +3730,7 @@ function setupSidebarResize() {
 
     // 双击重置到默认宽度
     resizeHandle.addEventListener('dblclick', function() {
-        const defaultWidth = 380;
+        const defaultWidth = 570; // 380px * 1.5 = 570px
         sidebar.style.width = defaultWidth + 'px';
         localStorage.setItem('sidebarWidth', defaultWidth);
         
@@ -3741,7 +3741,7 @@ function setupSidebarResize() {
     // 窗口大小改变时调整最大宽度限制
     window.addEventListener('resize', function() {
         const currentWidth = parseInt(sidebar.style.width, 10);
-        const maxWidth = Math.min(800, window.innerWidth * 0.6);
+        const maxWidth = Math.min(1200, window.innerWidth * 0.6); // 800px * 1.5 = 1200px
         
         if (currentWidth > maxWidth) {
             sidebar.style.width = maxWidth + 'px';
