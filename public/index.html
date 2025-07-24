@@ -1198,6 +1198,119 @@
             display: none;
         }
 
+        /* 拖拽相关样式 */
+        .tree-item[draggable="true"] {
+            cursor: grab;
+        }
+
+        .tree-item[draggable="true"]:active {
+            cursor: grabbing;
+        }
+
+        .tree-item.dragging {
+            opacity: 0.5;
+            transform: rotate(5deg);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+
+        .tree-item.drag-over {
+            background: rgba(102, 126, 234, 0.2);
+            border: 2px dashed #667eea;
+            transform: scale(1.02);
+        }
+
+        .tree-item.drag-over.folder {
+            background: rgba(243, 156, 18, 0.2);
+            border-color: #f39c12;
+        }
+
+        .drop-indicator {
+            height: 2px;
+            background: #667eea;
+            margin: 2px 0;
+            border-radius: 1px;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        .drop-indicator.active {
+            opacity: 1;
+        }
+
+        /* 根目录拖拽样式 */
+        .drag-over-root {
+            background: rgba(102, 126, 234, 0.1) !important;
+            border: 2px dashed #667eea !important;
+            border-radius: 8px;
+        }
+
+        /* 右键菜单样式 */
+        .context-menu {
+            position: fixed;
+            background: white;
+            border: 1px solid #e1e8ed;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            padding: 8px 0;
+            z-index: 10000;
+            min-width: 180px;
+            display: none;
+        }
+
+        .context-menu-item {
+            padding: 10px 16px;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            display: flex;
+            align-items: center;
+        }
+
+        .context-menu-item:hover {
+            background: #f8f9fa;
+        }
+
+        .context-menu-item.danger:hover {
+            background: #fff5f5;
+            color: #dc3545;
+        }
+
+        .context-menu-item i {
+            margin-right: 10px;
+            width: 16px;
+            text-align: center;
+        }
+
+        /* 剪贴板状态指示 */
+        .tree-item.clipboard-cut {
+            opacity: 0.6;
+            background-color: rgba(220, 53, 69, 0.1);
+            border-left: 3px solid #dc3545;
+        }
+
+        .tree-item.clipboard-copy {
+            background-color: rgba(40, 167, 69, 0.1);
+            border-left: 3px solid #28a745;
+        }
+
+        /* 键盘快捷键提示 */
+        .keyboard-shortcuts {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 6px;
+            font-size: 12px;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .keyboard-shortcuts.visible {
+            opacity: 1;
+        }
+
         .children.open {
             display: block;
         }
@@ -2629,6 +2742,10 @@
                     <i class="fas fa-times"></i>
                 </button>
             </div>
+            <div id="fileTargetInfo" style="padding: 10px; background: #f8f9fa; border-radius: 6px; margin-bottom: 15px; font-size: 14px; color: #666;">
+                <i class="fas fa-info-circle" style="margin-right: 5px; color: #3498db;"></i>
+                文件将创建在: <span id="fileTargetPath" style="font-weight: bold; color: #2c3e50;">根目录</span>
+            </div>
             <form id="addFileForm">
                 <div class="form-group">
                     <label for="newFileName">文件名:</label>
@@ -2655,6 +2772,10 @@
                 <button class="close-modal" onclick="closeAddFolderModal()">
                     <i class="fas fa-times"></i>
                 </button>
+            </div>
+            <div id="folderTargetInfo" style="padding: 10px; background: #f8f9fa; border-radius: 6px; margin-bottom: 15px; font-size: 14px; color: #666;">
+                <i class="fas fa-info-circle" style="margin-right: 5px; color: #3498db;"></i>
+                文件夹将创建在: <span id="folderTargetPath" style="font-weight: bold; color: #2c3e50;">根目录</span>
             </div>
             <form id="addFolderForm">
                 <div class="form-group">

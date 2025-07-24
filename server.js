@@ -1111,6 +1111,222 @@ function createNewFile(projectId, filePath, content, res, isPlaceholder = false)
     );
 }
 
+// 删除文件 - 从数据库删除指定文件
+app.delete('/api/projects/:id/files/*', requireAuth, (req, res) => {
+    try {
+        const projectId = req.params.id;
+        const filePath = req.params[0];
+        
+        console.log(`🗑️ 删除文件请求: 项目=${projectId}, 路径=${filePath}, 用户=${req.user.username}`);
+        
+        // 验证项目是否属于当前用户
+        db.get("SELECT id, name FROM projects WHERE id = ? AND user_id = ?", [projectId, req.user.id], (err, project) => {
+            if (err) {
+                console.error('验证项目失败:', err);
+                return res.status(500).json({ error: '验证项目失败' });
+            }
+            
+            if (!project) {
+                console.error(`项目不存在或无权限访问: projectId=${projectId}, userId=${req.user.id}`);
+                return res.status(404).json({ error: '项目不存在或无权限访问' });
+            }
+            
+            // 检查文件是否存在
+            db.get(
+                "SELECT id FROM project_files WHERE project_id = ? AND file_path = ?",
+                [projectId, filePath],
+                (err, file) => {
+                    if (err) {
+                        console.error('检查文件存在性失败:', err);
+                        return res.status(500).json({ error: '检查文件失败' });
+                    }
+                    
+                    if (!file) {
+                        return res.status(404).json({ error: '文件不存在' });
+                    }
+                    
+                    // 删除文件
+                    db.run(
+                        "DELETE FROM project_files WHERE project_id = ? AND file_path = ?",
+                        [projectId, filePath],
+                        function(err) {
+                            if (err) {
+                                console.error('删除文件失败:', err);
+                                return res.status(500).json({ error: '删除文件失败' });
+                            }
+                            
+                            if (this.changes === 0) {
+                                return res.status(404).json({ error: '文件不存在' });
+                            }
+                            
+                            console.log(`✅ 文件已删除: ${filePath}`);
+                            
+                            // 更新项目结构缓存
+                            updateProjectStructureCache(projectId);
+                            
+                            res.json({ 
+                                success: true, 
+                                message: '文件删除成功',
+                                deletedPath: filePath
+                            });
+                        }
+                    );
+                }
+            );
+        });
+    } catch (error) {
+        console.error('删除文件失败:', error);
+        res.status(500).json({ error: '删除文件失败' });
+    }
+});
+
+// 重命名或移动文件 
+app.patch('/api/projects/:id/files/*', requireAuth, (req, res) => {
+    try {
+        const projectId = req.params.id;
+        const oldPath = req.params[0];
+        const { newPath, operation = 'rename' } = req.body;
+        
+        if (!newPath) {
+            return res.status(400).json({ error: '新路径不能为空' });
+        }
+        
+        console.log(`🔄 ${operation}文件请求: 项目=${projectId}, 原路径=${oldPath}, 新路径=${newPath}, 用户=${req.user.username}`);
+        
+        // 验证项目是否属于当前用户
+        db.get("SELECT id, name FROM projects WHERE id = ? AND user_id = ?", [projectId, req.user.id], (err, project) => {
+            if (err) {
+                console.error('验证项目失败:', err);
+                return res.status(500).json({ error: '验证项目失败' });
+            }
+            
+            if (!project) {
+                console.error(`项目不存在或无权限访问: projectId=${projectId}, userId=${req.user.id}`);
+                return res.status(404).json({ error: '项目不存在或无权限访问' });
+            }
+            
+            // 检查原文件是否存在
+            db.get(
+                "SELECT id, content, size, last_modified, extension FROM project_files WHERE project_id = ? AND file_path = ?",
+                [projectId, oldPath],
+                (err, file) => {
+                    if (err) {
+                        console.error('检查原文件失败:', err);
+                        return res.status(500).json({ error: '检查文件失败' });
+                    }
+                    
+                    if (!file) {
+                        return res.status(404).json({ error: '原文件不存在' });
+                    }
+                    
+                    // 检查新路径是否已存在
+                    db.get(
+                        "SELECT id FROM project_files WHERE project_id = ? AND file_path = ?",
+                        [projectId, newPath],
+                        (err, existingFile) => {
+                            if (err) {
+                                console.error('检查新路径失败:', err);
+                                return res.status(500).json({ error: '检查新路径失败' });
+                            }
+                            
+                            if (existingFile) {
+                                return res.status(409).json({ error: '目标路径已存在文件' });
+                            }
+                            
+                            // 更新文件路径和扩展名
+                            const newExtension = path.extname(newPath).toLowerCase();
+                            
+                            db.run(
+                                "UPDATE project_files SET file_path = ?, extension = ?, last_modified = ? WHERE project_id = ? AND file_path = ?",
+                                [newPath, newExtension, Date.now(), projectId, oldPath],
+                                function(err) {
+                                    if (err) {
+                                        console.error('更新文件路径失败:', err);
+                                        return res.status(500).json({ error: '重命名文件失败' });
+                                    }
+                                    
+                                    if (this.changes === 0) {
+                                        return res.status(404).json({ error: '文件不存在' });
+                                    }
+                                    
+                                    console.log(`✅ 文件${operation}成功: ${oldPath} -> ${newPath}`);
+                                    
+                                    // 更新项目结构缓存
+                                    updateProjectStructureCache(projectId);
+                                    
+                                    res.json({ 
+                                        success: true, 
+                                        message: `文件${operation}成功`,
+                                        oldPath: oldPath,
+                                        newPath: newPath,
+                                        operation: operation
+                                    });
+                                }
+                            );
+                        }
+                    );
+                }
+            );
+        });
+    } catch (error) {
+        console.error('重命名/移动文件失败:', error);
+        res.status(500).json({ error: '操作失败' });
+    }
+});
+
+// 删除文件夹及其所有内容
+app.delete('/api/projects/:id/folders/*', requireAuth, (req, res) => {
+    try {
+        const projectId = req.params.id;
+        const folderPath = req.params[0];
+        
+        console.log(`🗑️ 删除文件夹请求: 项目=${projectId}, 路径=${folderPath}, 用户=${req.user.username}`);
+        
+        // 验证项目是否属于当前用户
+        db.get("SELECT id, name FROM projects WHERE id = ? AND user_id = ?", [projectId, req.user.id], (err, project) => {
+            if (err) {
+                console.error('验证项目失败:', err);
+                return res.status(500).json({ error: '验证项目失败' });
+            }
+            
+            if (!project) {
+                console.error(`项目不存在或无权限访问: projectId=${projectId}, userId=${req.user.id}`);
+                return res.status(404).json({ error: '项目不存在或无权限访问' });
+            }
+            
+            // 删除文件夹下所有文件（包括子文件夹中的文件）
+            const folderPattern = folderPath + '/%';
+            
+            db.run(
+                "DELETE FROM project_files WHERE project_id = ? AND (file_path LIKE ? OR file_path = ?)",
+                [projectId, folderPattern, folderPath],
+                function(err) {
+                    if (err) {
+                        console.error('删除文件夹失败:', err);
+                        return res.status(500).json({ error: '删除文件夹失败' });
+                    }
+                    
+                    const deletedCount = this.changes;
+                    console.log(`✅ 文件夹已删除: ${folderPath} (删除了 ${deletedCount} 个文件)`);
+                    
+                    // 更新项目结构缓存
+                    updateProjectStructureCache(projectId);
+                    
+                    res.json({ 
+                        success: true, 
+                        message: '文件夹删除成功',
+                        deletedPath: folderPath,
+                        deletedFiles: deletedCount
+                    });
+                }
+            );
+        });
+    } catch (error) {
+        console.error('删除文件夹失败:', error);
+        res.status(500).json({ error: '删除文件夹失败' });
+    }
+});
+
 // 辅助函数：更新项目结构缓存
 function updateProjectStructureCache(projectId) {
     // 获取项目所有文件，重新生成结构

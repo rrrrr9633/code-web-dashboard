@@ -4,6 +4,15 @@ let currentProject = null;
 let currentRenameProjectId = null;
 let projects = [];
 let aiConfigured = false;
+let selectedDirectory = null; // 当前选中的目录路径
+
+// 拖拽和剪贴板相关变量
+let draggedItem = null;
+let clipboard = {
+    item: null,
+    operation: null // 'copy' or 'cut'
+};
+let dropIndicators = [];
 
 // 调试函数：检查AI配置状态
 function debugAIStatus() {
@@ -33,6 +42,10 @@ document.addEventListener('DOMContentLoaded', function() {
     setupAddFileForm();
     setupAddFolderForm();
     setupRenameForm();
+    
+    // 设置拖拽和键盘事件
+    setupDragAndDrop();
+    setupKeyboardShortcuts();
     
     // 显示数据库持久化提示
     showPersistenceNotification();
@@ -564,6 +577,7 @@ function createTreeItem(item) {
     const itemDiv = document.createElement('div');
     itemDiv.className = 'tree-item';
     itemDiv.setAttribute('data-type', item.type);
+    itemDiv.setAttribute('data-path', item.path); // 为所有项目设置路径属性
 
     const labelDiv = document.createElement('div');
     labelDiv.className = 'tree-label';
@@ -602,6 +616,7 @@ function createTreeItem(item) {
             icon.style.color = categoryColor;
         }
     } else if (item.type === 'directory') {
+        itemDiv.classList.add('directory'); // 添加目录标识类
         labelDiv.innerHTML = `
             <i class="fas fa-folder folder-icon" style="color: #3498db;"></i>
             <span>${item.name}</span>
@@ -623,6 +638,9 @@ function createTreeItem(item) {
         
         // 添加右键菜单支持
         addContextMenuToTreeItem(itemDiv, item);
+        
+        // 添加拖拽支持
+        addDragAndDropToTreeItem(itemDiv, item);
     } else if (item.type === 'file') {
         const fileIcon = getFileIcon(item.extension);
         labelDiv.innerHTML = `
@@ -631,6 +649,15 @@ function createTreeItem(item) {
         `;
         
         labelDiv.onclick = function() {
+            // 清除其他项目的选中状态
+            document.querySelectorAll('.tree-item.selected').forEach(el => {
+                el.classList.remove('selected');
+            });
+            
+            // 设置当前文件为选中状态
+            itemDiv.classList.add('selected');
+            selectedDirectory = null; // 清除选中的目录
+            
             openFile(item.path, item.handle);
         };
 
@@ -638,6 +665,9 @@ function createTreeItem(item) {
         
         // 添加右键菜单支持
         addContextMenuToTreeItem(itemDiv, item);
+        
+        // 添加拖拽支持
+        addDragAndDropToTreeItem(itemDiv, item);
     }
 
     return itemDiv;
@@ -695,15 +725,35 @@ function toggleDirectory(itemDiv, item) {
     const childrenDiv = itemDiv.querySelector('.children');
     const icon = itemDiv.querySelector('.folder-icon');
     
+    // 更新选中的目录
+    if (item.type === 'directory') {
+        selectedDirectory = item.path;
+        
+        // 清除其他目录的选中状态
+        document.querySelectorAll('.tree-item.selected').forEach(el => {
+            el.classList.remove('selected');
+        });
+        
+        // 设置当前目录为选中状态
+        itemDiv.classList.add('selected');
+        itemDiv.setAttribute('data-path', item.path);
+        
+        console.log(`选中目录: ${selectedDirectory}`);
+    }
+    
     if (childrenDiv) {
         if (childrenDiv.classList.contains('open')) {
             childrenDiv.classList.remove('open');
-            icon.classList.remove('fa-folder-open');
-            icon.classList.add('fa-folder');
+            if (icon) {
+                icon.classList.remove('fa-folder-open');
+                icon.classList.add('fa-folder');
+            }
         } else {
             childrenDiv.classList.add('open');
-            icon.classList.remove('fa-folder');
-            icon.classList.add('fa-folder-open');
+            if (icon) {
+                icon.classList.remove('fa-folder');
+                icon.classList.add('fa-folder-open');
+            }
         }
     }
 }
@@ -5077,6 +5127,13 @@ function addNewFile() {
         showNotification('请先选择一个项目', 'error');
         return;
     }
+    
+    // 更新目标路径显示
+    const targetPathElement = document.getElementById('fileTargetPath');
+    if (targetPathElement) {
+        targetPathElement.textContent = selectedDirectory || '根目录';
+    }
+    
     document.getElementById('addFileModal').style.display = 'block';
 }
 
@@ -5092,6 +5149,13 @@ function addNewFolder() {
         showNotification('请先选择一个项目', 'error');
         return;
     }
+    
+    // 更新目标路径显示
+    const targetPathElement = document.getElementById('folderTargetPath');
+    if (targetPathElement) {
+        targetPathElement.textContent = selectedDirectory || '根目录';
+    }
+    
     document.getElementById('addFolderModal').style.display = 'block';
 }
 
@@ -5129,11 +5193,20 @@ function setupAddFileForm() {
                 return;
             }
             
+            // 构建完整的文件路径（考虑选中的目录）
+            let fullFileName = fileName;
+            if (selectedDirectory) {
+                fullFileName = selectedDirectory + '/' + fileName;
+                console.log(`在选中目录 "${selectedDirectory}" 下创建文件: ${fileName} -> ${fullFileName}`);
+            } else {
+                console.log(`在根目录下创建文件: ${fileName}`);
+            }
+            
             try {
-                console.log(`📁 为项目 "${currentProject.name}" (ID: ${currentProject.id}) 创建文件: ${fileName}`);
+                console.log(`📁 为项目 "${currentProject.name}" (ID: ${currentProject.id}) 创建文件: ${fullFileName}`);
                 
                 const sessionToken = localStorage.getItem('authToken');
-                const response = await fetch(`/api/projects/${currentProject.id}/files/${encodeURIComponent(fileName)}`, {
+                const response = await fetch(`/api/projects/${currentProject.id}/files/${encodeURIComponent(fullFileName)}`, {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
@@ -5157,7 +5230,8 @@ function setupAddFileForm() {
                     // 显示同步选项
                     showLocalSyncOptions();
                     
-                    showNotification(`文件 "${fileName}" 已添加到项目 "${currentProject.name}"`, 'success');
+                    const targetLocation = selectedDirectory ? `文件夹 "${selectedDirectory}"` : '根目录';
+                    showNotification(`文件 "${fileName}" 已添加到项目 "${currentProject.name}" 的${targetLocation}`, 'success');
                 } else {
                     const error = await response.json();
                     throw new Error(error.error || '创建文件失败');
@@ -5197,11 +5271,20 @@ function setupAddFolderForm() {
                 return;
             }
             
+            // 构建完整的文件夹路径（考虑选中的目录）
+            let fullFolderName = folderName;
+            if (selectedDirectory) {
+                fullFolderName = selectedDirectory + '/' + folderName;
+                console.log(`在选中目录 "${selectedDirectory}" 下创建文件夹: ${folderName} -> ${fullFolderName}`);
+            } else {
+                console.log(`在根目录下创建文件夹: ${folderName}`);
+            }
+            
             try {
-                console.log(`📁 为项目 "${currentProject.name}" (ID: ${currentProject.id}) 创建文件夹: ${folderName}`);
+                console.log(`📁 为项目 "${currentProject.name}" (ID: ${currentProject.id}) 创建文件夹: ${fullFolderName}`);
                 
                 // 通过创建一个占位文件来创建文件夹
-                const placeholderFileName = `${folderName}/.gitkeep`;
+                const placeholderFileName = `${fullFolderName}/.gitkeep`;
                 const placeholderContent = `# 文件夹占位文件\n\n此文件用于保持 "${folderName}" 文件夹结构。\n当文件夹中有其他文件时，可以安全删除此文件。\n\n项目: ${currentProject.name}\n创建时间: ${new Date().toLocaleString()}`;
                 
                 const sessionToken = localStorage.getItem('authToken');
@@ -5230,7 +5313,8 @@ function setupAddFolderForm() {
                     // 显示同步选项
                     showLocalSyncOptions();
                     
-                    showNotification(`文件夹 "${folderName}" 已添加到项目 "${currentProject.name}"`, 'success');
+                    const targetLocation = selectedDirectory ? `文件夹 "${selectedDirectory}"` : '根目录';
+                    showNotification(`文件夹 "${folderName}" 已添加到项目 "${currentProject.name}" 的${targetLocation}`, 'success');
                 } else {
                     const error = await response.json();
                     throw new Error(error.error || '创建文件夹失败');
@@ -5323,53 +5407,156 @@ async function performRename(oldPath, newName, type) {
     const sessionToken = localStorage.getItem('authToken');
     
     if (type === 'file') {
-        // 文件重命名：读取旧文件内容，创建新文件，删除旧文件
-        const readResponse = await fetch(`/api/projects/${currentProject.id}/files/${oldPath}`, {
-            headers: { 'Authorization': `Bearer ${sessionToken}` }
-        });
-        
-        if (!readResponse.ok) {
-            throw new Error('无法读取原文件');
-        }
-        
-        const fileData = await readResponse.json();
+        // 计算新路径
         const pathParts = oldPath.split('/');
         pathParts[pathParts.length - 1] = newName;
         const newPath = pathParts.join('/');
         
-        // 创建新文件
-        const createResponse = await fetch(`/api/projects/${currentProject.id}/files/${newPath}`, {
-            method: 'PUT',
+        // 使用新的PATCH API重命名文件
+        const response = await fetch(`/api/projects/${currentProject.id}/files/${encodeURIComponent(oldPath)}`, {
+            method: 'PATCH',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${sessionToken}`
             },
-            body: JSON.stringify({ content: fileData.content })
+            body: JSON.stringify({ 
+                newPath: newPath,
+                operation: 'rename'
+            })
         });
         
-        if (!createResponse.ok) {
-            throw new Error('创建新文件失败');
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || '重命名文件失败');
         }
         
-        // 删除旧文件（这里简化处理，实际应该有专门的删除API）
+        const result = await response.json();
         console.log(`文件重命名完成: ${oldPath} -> ${newPath}`);
+        return result;
         
     } else if (type === 'folder') {
-        // 文件夹重命名比较复杂，需要重命名所有子文件
-        throw new Error('文件夹重命名功能正在开发中');
+        // 文件夹重命名：找到所有以该路径为前缀的文件，批量重命名
+        const pathParts = oldPath.split('/');
+        pathParts[pathParts.length - 1] = newName;
+        const newBasePath = pathParts.join('/');
+        
+        // 获取文件夹下所有文件
+        const filesResponse = await fetch(`/api/projects/${currentProject.id}/files`, {
+            headers: { 'Authorization': `Bearer ${sessionToken}` }
+        });
+        
+        if (!filesResponse.ok) {
+            throw new Error('获取项目文件列表失败');
+        }
+        
+        const filesData = await filesResponse.json();
+        const filesToRename = filesData.files.filter(file => 
+            file.path.startsWith(oldPath + '/') || file.path === oldPath
+        );
+        
+        // 批量重命名文件
+        const renamePromises = filesToRename.map(async (file) => {
+            const relativePath = file.path.substring(oldPath.length);
+            const newFilePath = newBasePath + relativePath;
+            
+            return fetch(`/api/projects/${currentProject.id}/files/${encodeURIComponent(file.path)}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${sessionToken}`
+                },
+                body: JSON.stringify({ 
+                    newPath: newFilePath,
+                    operation: 'move'
+                })
+            });
+        });
+        
+        await Promise.all(renamePromises);
+        console.log(`文件夹重命名完成: ${oldPath} -> ${newBasePath}`);
+        
+        return { success: true, message: '文件夹重命名成功' };
     }
 }
 
 // 添加右键菜单功能到文件树项目
 function addContextMenuToTreeItem(itemElement, item) {
+    console.log('为项目添加右键菜单:', {
+        path: item.path,
+        type: item.type,
+        name: item.name
+    });
+    
     itemElement.addEventListener('contextmenu', function(e) {
         e.preventDefault();
+        e.stopPropagation(); // 防止事件冒泡
+        
+        console.log('触发右键菜单事件:', {
+            path: item.path,
+            type: item.type,
+            name: item.name,
+            eventTarget: e.target
+        });
         showContextMenu(e.pageX, e.pageY, item);
     });
 }
 
+// 显示根目录上下文菜单
+function showRootContextMenu(x, y) {
+    // 移除已存在的菜单
+    const existingMenu = document.querySelector('.context-menu');
+    if (existingMenu) {
+        existingMenu.remove();
+    }
+    
+    const menu = document.createElement('div');
+    menu.className = 'context-menu';
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+    
+    menu.innerHTML = `
+        <div class="context-menu-item" onclick="addNewFile(); this.parentElement.remove();">
+            <i class="fas fa-file-plus"></i>
+            新建文件
+        </div>
+        <div class="context-menu-item" onclick="addNewFolder(); this.parentElement.remove();">
+            <i class="fas fa-folder-plus"></i>
+            新建文件夹
+        </div>
+        <hr style="margin: 4px 0; border: none; border-top: 1px solid #eee;">
+        <div class="context-menu-item ${clipboard.item ? '' : 'disabled'}" onclick="pasteItem(''); this.parentElement.remove();">
+            <i class="fas fa-paste"></i>
+            粘贴到根目录
+        </div>
+        ${clipboard.item ? `
+        <div class="context-menu-item" onclick="clearClipboard(); this.parentElement.remove();">
+            <i class="fas fa-times"></i>
+            清空剪贴板
+        </div>
+        ` : ''}
+    `;
+    
+    document.body.appendChild(menu);
+    menu.style.display = 'block';
+    
+    // 点击其他地方关闭菜单
+    setTimeout(() => {
+        document.addEventListener('click', function closeMenu() {
+            menu.remove();
+            document.removeEventListener('click', closeMenu);
+        }, 100);
+    }, 100);
+}
+
 // 显示上下文菜单
 function showContextMenu(x, y, item) {
+    // 添加调试信息
+    console.log('显示上下文菜单:', {
+        path: item.path,
+        type: item.type,
+        name: item.name
+    });
+    
     // 移除已存在的菜单
     const existingMenu = document.querySelector('.context-menu');
     if (existingMenu) {
@@ -5382,11 +5569,26 @@ function showContextMenu(x, y, item) {
     menu.style.top = y + 'px';
     
     if (item.type === 'file') {
+        console.log('创建文件菜单');
         menu.innerHTML = `
             <div class="context-menu-item" onclick="openFile('${item.path}')">
                 <i class="fas fa-file-alt"></i>
                 打开文件
             </div>
+            <hr style="margin: 4px 0; border: none; border-top: 1px solid #eee;">
+            <div class="context-menu-item" onclick="copyItem('${item.path}', 'file')">
+                <i class="fas fa-copy"></i>
+                复制
+            </div>
+            <div class="context-menu-item" onclick="cutItem('${item.path}', 'file')">
+                <i class="fas fa-cut"></i>
+                剪切
+            </div>
+            <div class="context-menu-item ${clipboard.item ? '' : 'disabled'}" onclick="pasteItem('${item.path}')">
+                <i class="fas fa-paste"></i>
+                粘贴
+            </div>
+            <hr style="margin: 4px 0; border: none; border-top: 1px solid #eee;">
             <div class="context-menu-item" onclick="showRenameModal('${item.path}', 'file', '${item.name}')">
                 <i class="fas fa-edit"></i>
                 重命名
@@ -5397,7 +5599,21 @@ function showContextMenu(x, y, item) {
             </div>
         `;
     } else if (item.type === 'directory') {
+        console.log('创建文件夹菜单');
         menu.innerHTML = `
+            <div class="context-menu-item" onclick="copyItem('${item.path}', 'directory')">
+                <i class="fas fa-copy"></i>
+                复制文件夹
+            </div>
+            <div class="context-menu-item" onclick="cutItem('${item.path}', 'directory')">
+                <i class="fas fa-cut"></i>
+                剪切文件夹
+            </div>
+            <div class="context-menu-item ${clipboard.item ? '' : 'disabled'}" onclick="pasteItem('${item.path}')">
+                <i class="fas fa-paste"></i>
+                粘贴到此处
+            </div>
+            <hr style="margin: 4px 0; border: none; border-top: 1px solid #eee;">
             <div class="context-menu-item" onclick="showRenameModal('${item.path}', 'folder', '${item.name}')">
                 <i class="fas fa-edit"></i>
                 重命名文件夹
@@ -5407,6 +5623,8 @@ function showContextMenu(x, y, item) {
                 删除文件夹
             </div>
         `;
+    } else {
+        console.warn('未知的项目类型:', item.type);
     }
     
     document.body.appendChild(menu);
@@ -5427,20 +5645,109 @@ async function deleteFile(filePath) {
         return;
     }
     
-    // 这里应该调用删除API，但当前服务器没有提供删除API
-    // 暂时显示提示
-    showNotification('删除功能需要服务器端支持，敬请期待', 'info');
+    if (!currentProject) {
+        showNotification('没有选择项目', 'error');
+        return;
+    }
+    
+    try {
+        showNotification('正在删除文件...', 'info');
+        
+        const sessionToken = localStorage.getItem('authToken');
+        const response = await fetch(`/api/projects/${currentProject.id}/files/${encodeURIComponent(filePath)}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${sessionToken}`
+            }
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || '删除文件失败');
+        }
+        
+        const result = await response.json();
+        
+        // 如果删除的是当前打开的文件，清空显示区域
+        if (currentFile === filePath) {
+            currentFile = null;
+            currentFileContent = null;
+            
+            // 安全地更新文件内容显示区域
+            const fileContentElement = document.getElementById('file-content');
+            const codeContentElement = document.getElementById('codeContent');
+            
+            if (fileContentElement) {
+                fileContentElement.innerHTML = '<p style="text-align: center; color: #666; margin-top: 50px;">请选择一个文件查看内容</p>';
+            }
+            
+            if (codeContentElement) {
+                codeContentElement.style.display = 'none';
+            }
+            
+            // 显示欢迎消息
+            const welcomeElement = document.getElementById('welcomeMessage');
+            if (welcomeElement) {
+                welcomeElement.style.display = 'block';
+            }
+        }
+        
+        // 重新加载项目结构
+        await loadProjectStructure(currentProject);
+        
+        showNotification('文件删除成功！', 'success');
+        
+    } catch (error) {
+        console.error('删除文件失败:', error);
+        showNotification('删除文件失败: ' + error.message, 'error');
+    }
 }
 
 // 删除文件夹
 async function deleteFolder(folderPath) {
-    if (!confirm(`确定要删除文件夹 "${folderPath}" 及其所有内容吗？`)) {
+    if (!confirm(`确定要删除文件夹 "${folderPath}" 及其所有内容吗？\n\n⚠️ 此操作不可撤销！`)) {
         return;
     }
     
-    // 这里应该调用删除API，但当前服务器没有提供删除API
-    // 暂时显示提示
-    showNotification('删除功能需要服务器端支持，敬请期待', 'info');
+    if (!currentProject) {
+        showNotification('没有选择项目', 'error');
+        return;
+    }
+    
+    try {
+        showNotification('正在删除文件夹...', 'info');
+        
+        const sessionToken = localStorage.getItem('authToken');
+        const response = await fetch(`/api/projects/${currentProject.id}/folders/${encodeURIComponent(folderPath)}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${sessionToken}`
+            }
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || '删除文件夹失败');
+        }
+        
+        const result = await response.json();
+        
+        // 如果删除的文件夹包含当前打开的文件，清空显示区域
+        if (currentFile && currentFile.startsWith(folderPath + '/')) {
+            currentFile = null;
+            currentFileContent = null;
+            document.getElementById('file-content').innerHTML = '<p style="text-align: center; color: #666; margin-top: 50px;">请选择一个文件查看内容</p>';
+        }
+        
+        // 重新加载项目结构
+        await loadProjectStructure(currentProject);
+        
+        showNotification(`文件夹删除成功！删除了 ${result.deletedFiles} 个文件`, 'success');
+        
+    } catch (error) {
+        console.error('删除文件夹失败:', error);
+        showNotification('删除文件夹失败: ' + error.message, 'error');
+    }
 }
 
 // 显示本地同步选项
@@ -5631,4 +5938,783 @@ function displayLanguageEnvironment(envData) {
         panel.style.transform = 'translate(-50%, -50%) scale(1)';
         panel.style.opacity = '1';
     });
+}
+
+// 设置拖拽功能
+function setupDragAndDrop() {
+    // 全局拖拽结束事件
+    document.addEventListener('dragend', function() {
+        // 清理拖拽状态
+        document.querySelectorAll('.drag-over').forEach(el => {
+            el.classList.remove('drag-over');
+        });
+        // 清理根目录拖拽样式
+        const fileTree = document.getElementById('fileTree');
+        if (fileTree) {
+            fileTree.classList.remove('drag-over-root');
+        }
+        draggedItem = null;
+    });
+    
+    // 防止默认拖拽行为
+    document.addEventListener('dragover', function(e) {
+        e.preventDefault();
+    });
+    
+    document.addEventListener('drop', function(e) {
+        e.preventDefault();
+    });
+    
+    // 为文件树区域添加右键菜单
+    const fileTree = document.getElementById('fileTree');
+    if (fileTree) {
+        fileTree.addEventListener('contextmenu', function(e) {
+            // 查找最近的树项目元素
+            const treeItem = e.target.closest('.tree-item');
+            
+            console.log('文件树右键事件:', {
+                target: e.target.tagName,
+                targetClass: e.target.className,
+                treeItem: treeItem ? 'found' : 'not found',
+                treeItemPath: treeItem ? treeItem.getAttribute('data-path') : 'none'
+            });
+            
+            // 如果点击的不是文件树项目，显示根目录菜单
+            if (!treeItem) {
+                e.preventDefault();
+                console.log('显示根目录菜单');
+                showRootContextMenu(e.pageX, e.pageY);
+            }
+            // 如果点击的是文件树项目，让项目自己的事件处理器处理
+        });
+        
+        // 为根目录添加拖拽目标功能
+        fileTree.addEventListener('dragover', function(e) {
+            // 只有当拖拽目标不是文件树项目时才处理根目录拖拽
+            if (!e.target.closest('.tree-item')) {
+                e.preventDefault();
+                if (draggedItem) {
+                    fileTree.classList.add('drag-over-root');
+                    e.dataTransfer.dropEffect = 'move';
+                }
+            }
+        });
+        
+        fileTree.addEventListener('dragleave', function(e) {
+            // 检查是否真正离开了文件树区域
+            const rect = fileTree.getBoundingClientRect();
+            const x = e.clientX;
+            const y = e.clientY;
+            
+            // 如果鼠标位置在文件树区域外，或者relatedTarget不在文件树内，移除样式
+            if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom || 
+                (!e.relatedTarget || !fileTree.contains(e.relatedTarget))) {
+                fileTree.classList.remove('drag-over-root');
+            }
+        });
+        
+        fileTree.addEventListener('drop', function(e) {
+            // 只有当拖拽目标不是文件树项目时才处理根目录拖拽
+            if (!e.target.closest('.tree-item')) {
+                e.preventDefault();
+                fileTree.classList.remove('drag-over-root');
+                
+                if (draggedItem) {
+                    // 移动到根目录
+                    moveItemToFolder(draggedItem, '');
+                }
+            }
+        });
+    }
+}
+
+// 为文件树项目添加拖拽功能
+function addDragAndDropToTreeItem(itemElement, item) {
+    // 使项目可拖拽
+    itemElement.draggable = true;
+    
+    // 拖拽开始
+    itemElement.addEventListener('dragstart', function(e) {
+        e.stopPropagation(); // 防止事件冒泡
+        draggedItem = item;
+        itemElement.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', item.path);
+    });
+    
+    // 拖拽结束
+    itemElement.addEventListener('dragend', function(e) {
+        itemElement.classList.remove('dragging');
+        document.querySelectorAll('.drag-over').forEach(el => {
+            el.classList.remove('drag-over');
+        });
+        // 清除根目录的拖拽样式
+        const fileTree = document.getElementById('fileTree');
+        if (fileTree) {
+            fileTree.classList.remove('drag-over-root');
+        }
+    });
+    
+    // 只有文件夹可以作为拖拽目标
+    if (item.type === 'directory') {
+        itemElement.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            if (draggedItem && draggedItem.path !== item.path) {
+                // 只有当拖拽的是文件夹时，才需要检查是否移动到自己的子目录
+                if (draggedItem.type === 'directory' && item.path.startsWith(draggedItem.path + '/')) {
+                    // 不允许文件夹移动到自己的子目录
+                    e.dataTransfer.dropEffect = 'none';
+                    return;
+                }
+                itemElement.classList.add('drag-over');
+                e.dataTransfer.dropEffect = 'move';
+            }
+        });
+        
+        itemElement.addEventListener('dragleave', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            // 只有当鼠标真正离开元素时才移除样式
+            if (!itemElement.contains(e.relatedTarget)) {
+                itemElement.classList.remove('drag-over');
+            }
+        });
+        
+        itemElement.addEventListener('drop', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            itemElement.classList.remove('drag-over');
+            
+            if (draggedItem && draggedItem.path !== item.path) {
+                // 检查是否将文件拖拽到它当前所在的文件夹
+                const draggedParentPath = draggedItem.path.includes('/') 
+                    ? draggedItem.path.substring(0, draggedItem.path.lastIndexOf('/'))
+                    : '';
+                
+                if (draggedParentPath === item.path) {
+                    showNotification(`文件已在 ${item.path || '根目录'} 文件夹中`, 'info');
+                    return;
+                }
+                
+                // 只有当拖拽的是文件夹时，才需要检查是否移动到自己的子目录
+                if (draggedItem.type === 'directory' && item.path.startsWith(draggedItem.path + '/')) {
+                    showNotification('不能将文件夹移动到自己的子目录', 'error');
+                    return;
+                }
+                // 执行移动操作
+                moveItemToFolder(draggedItem, item.path);
+            }
+        });
+    }
+}
+
+// 移动项目到文件夹
+async function moveItemToFolder(item, targetFolderPath) {
+    if (!currentProject) {
+        showNotification('没有选择项目', 'error');
+        return;
+    }
+    
+    try {
+        const itemName = item.path.split('/').pop();
+        // 如果目标路径为空，则移动到根目录
+        const newPath = targetFolderPath ? targetFolderPath + '/' + itemName : itemName;
+        
+        // 检查是否是无意义的移动（目标路径和源路径相同）
+        if (item.path === newPath) {
+            // 根据项目类型和位置给出更准确的提示
+            if (item.type === 'directory') {
+                if (targetFolderPath === '') {
+                    showNotification(`文件夹 "${item.name}" 已在根目录`, 'info');
+                } else {
+                    showNotification(`文件夹 "${item.name}" 已在 "${targetFolderPath}" 中`, 'info');
+                }
+            } else {
+                if (targetFolderPath === '') {
+                    showNotification(`文件 "${item.name}" 已在根目录`, 'info');
+                } else {
+                    showNotification(`文件 "${item.name}" 已在 "${targetFolderPath}" 中`, 'info');
+                }
+            }
+            return;
+        }
+        
+        // 检查是否是将文件夹移动到自己内部
+        if (item.type === 'directory' && newPath.startsWith(item.path + '/')) {
+            showNotification('不能将文件夹移动到自己内部', 'error');
+            return;
+        }
+        
+        if (item.type === 'file') {
+            // 移动文件
+            const sessionToken = localStorage.getItem('authToken');
+            const response = await fetch(`/api/projects/${currentProject.id}/files/${encodeURIComponent(item.path)}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${sessionToken}`
+                },
+                body: JSON.stringify({ 
+                    newPath: newPath,
+                    operation: 'move'
+                })
+            });
+            
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || '移动文件失败');
+            }
+            
+            const targetLocation = targetFolderPath || '根目录';
+            showNotification(`文件已移动到 ${targetLocation}`, 'success');
+        } else if (item.type === 'directory') {
+            // 移动文件夹（需要移动文件夹内所有文件）
+            await moveFolderContents(item.path, newPath);
+            const targetLocation = targetFolderPath || '根目录';
+            showNotification(`文件夹已移动到 ${targetLocation}`, 'success');
+        }
+        
+        // 重新加载项目结构
+        await loadProjectStructure(currentProject);
+        
+    } catch (error) {
+        console.error('移动失败:', error);
+        showNotification('移动失败: ' + error.message, 'error');
+    }
+}
+
+// 复制项目
+function copyItem(itemPath, itemType) {
+    clipboard.item = { path: itemPath, type: itemType };
+    clipboard.operation = 'copy';
+    
+    showNotification(`已复制 ${itemType === 'file' ? '文件' : '文件夹'}: ${itemPath}`, 'info');
+    updateClipboardStatus();
+}
+
+// 剪切项目
+function cutItem(itemPath, itemType) {
+    clipboard.item = { path: itemPath, type: itemType };
+    clipboard.operation = 'cut';
+    
+    showNotification(`已剪切 ${itemType === 'file' ? '文件' : '文件夹'}: ${itemPath}`, 'info');
+    updateClipboardStatus();
+    
+    // 添加剪切视觉效果
+    const treeItems = document.querySelectorAll('.tree-item');
+    treeItems.forEach(item => {
+        const itemPathAttr = item.getAttribute('data-path');
+        if (itemPathAttr === itemPath) {
+            item.classList.add('clipboard-cut');
+        }
+    });
+}
+
+// 粘贴项目
+async function pasteItem(targetPath) {
+    if (!clipboard.item) {
+        showNotification('剪贴板为空', 'warning');
+        return;
+    }
+    
+    if (!currentProject) {
+        showNotification('没有选择项目', 'error');
+        return;
+    }
+    
+    try {
+        const itemName = clipboard.item.path.split('/').pop();
+        const newPath = targetPath ? targetPath + '/' + itemName : itemName;
+        
+        if (clipboard.operation === 'copy') {
+            // 复制操作
+            if (clipboard.item.type === 'file') {
+                await copyFile(clipboard.item.path, newPath);
+            } else {
+                await copyFolder(clipboard.item.path, newPath);
+            }
+            showNotification(`已复制到 ${targetPath || '根目录'}`, 'success');
+        } else if (clipboard.operation === 'cut') {
+            // 剪切操作（移动）
+            if (clipboard.item.type === 'file') {
+                await moveFile(clipboard.item.path, newPath);
+            } else {
+                await moveFolderContents(clipboard.item.path, newPath);
+            }
+            showNotification(`已移动到 ${targetPath || '根目录'}`, 'success');
+            
+            // 清空剪贴板
+            clearClipboard();
+        }
+        
+        // 重新加载项目结构
+        await loadProjectStructure(currentProject);
+        
+    } catch (error) {
+        console.error('粘贴失败:', error);
+        showNotification('粘贴失败: ' + error.message, 'error');
+    }
+}
+
+// 复制文件
+async function copyFile(sourcePath, targetPath) {
+    const sessionToken = localStorage.getItem('authToken');
+    
+    // 获取源文件内容
+    const getResponse = await fetch(`/api/projects/${currentProject.id}/files/${encodeURIComponent(sourcePath)}`, {
+        headers: {
+            'Authorization': `Bearer ${sessionToken}`
+        }
+    });
+    
+    if (!getResponse.ok) {
+        throw new Error('获取源文件内容失败');
+    }
+    
+    const fileData = await getResponse.json();
+    
+    // 创建新文件
+    const putResponse = await fetch(`/api/projects/${currentProject.id}/files/${encodeURIComponent(targetPath)}`, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${sessionToken}`
+        },
+        body: JSON.stringify({
+            content: fileData.content,
+            projectId: currentProject.id
+        })
+    });
+    
+    if (!putResponse.ok) {
+        const errorData = await putResponse.json();
+        throw new Error(errorData.error || '创建目标文件失败');
+    }
+}
+
+// 移动文件
+async function moveFile(sourcePath, targetPath) {
+    const sessionToken = localStorage.getItem('authToken');
+    
+    const response = await fetch(`/api/projects/${currentProject.id}/files/${encodeURIComponent(sourcePath)}`, {
+        method: 'PATCH',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${sessionToken}`
+        },
+        body: JSON.stringify({ 
+            newPath: targetPath,
+            operation: 'move'
+        })
+    });
+    
+    if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || '移动文件失败');
+    }
+}
+
+// 复制文件夹
+async function copyFolder(sourcePath, targetPath) {
+    // 获取项目结构
+    const sessionToken = localStorage.getItem('authToken');
+    const response = await fetch(`/api/projects/${currentProject.id}/files`, {
+        headers: {
+            'Authorization': `Bearer ${sessionToken}`
+        }
+    });
+    
+    if (!response.ok) {
+        throw new Error('获取项目结构失败');
+    }
+    
+    const data = await response.json();
+    const files = data.files || [];
+    
+    // 找到所有在源文件夹中的文件
+    const sourceFiles = files.filter(file => 
+        file.path.startsWith(sourcePath + '/') || file.path === sourcePath
+    );
+    
+    // 复制每个文件
+    for (const file of sourceFiles) {
+        const relativePath = file.path.substring(sourcePath.length);
+        const newFilePath = targetPath + relativePath;
+        await copyFile(file.path, newFilePath);
+    }
+}
+
+// 移动文件夹内容
+async function moveFolderContents(sourcePath, targetPath) {
+    // 获取项目结构
+    const sessionToken = localStorage.getItem('authToken');
+    const response = await fetch(`/api/projects/${currentProject.id}/files`, {
+        headers: {
+            'Authorization': `Bearer ${sessionToken}`
+        }
+    });
+    
+    if (!response.ok) {
+        throw new Error('获取项目结构失败');
+    }
+    
+    const data = await response.json();
+    const files = data.files || [];
+    
+    // 找到所有在源文件夹中的文件
+    const sourceFiles = files.filter(file => 
+        file.path.startsWith(sourcePath + '/') || file.path === sourcePath
+    );
+    
+    // 移动每个文件
+    for (const file of sourceFiles) {
+        const relativePath = file.path.substring(sourcePath.length);
+        const newFilePath = targetPath + relativePath;
+        await moveFile(file.path, newFilePath);
+    }
+}
+
+// 更新剪贴板状态显示
+function updateClipboardStatus() {
+    // 清除所有剪贴板相关的样式
+    document.querySelectorAll('.clipboard-cut, .clipboard-copy').forEach(el => {
+        el.classList.remove('clipboard-cut', 'clipboard-copy');
+    });
+    
+    // 更新剪贴板状态指示器
+    updateClipboardIndicator();
+    
+    if (clipboard.item) {
+        const treeItems = document.querySelectorAll('.tree-item');
+        treeItems.forEach(item => {
+            const itemPath = item.getAttribute('data-path');
+            if (itemPath === clipboard.item.path) {
+                item.classList.add(`clipboard-${clipboard.operation}`);
+            }
+        });
+    }
+}
+
+// 更新剪贴板指示器
+function updateClipboardIndicator() {
+    // 移除现有的指示器
+    const existingIndicator = document.querySelector('.clipboard-indicator');
+    if (existingIndicator) {
+        existingIndicator.remove();
+    }
+    
+    // 如果有剪贴板内容，创建指示器
+    if (clipboard.item) {
+        const indicator = document.createElement('div');
+        indicator.className = 'clipboard-indicator';
+        indicator.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: ${clipboard.operation === 'cut' ? '#dc3545' : '#28a745'};
+            color: white;
+            padding: 10px 15px;
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 1000;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s ease;
+        `;
+        
+        const operationIcon = clipboard.operation === 'cut' ? 'fa-cut' : 'fa-copy';
+        const operationText = clipboard.operation === 'cut' ? '剪切' : '复制';
+        const itemName = clipboard.item.path.split('/').pop();
+        const itemIcon = clipboard.item.type === 'file' ? 'fa-file' : 'fa-folder';
+        
+        indicator.innerHTML = `
+            <i class="fas ${operationIcon}"></i>
+            <span>${operationText}: </span>
+            <i class="fas ${itemIcon}"></i>
+            <span>${itemName}</span>
+            <button onclick="clearClipboard()" style="
+                background: none;
+                border: none;
+                color: white;
+                cursor: pointer;
+                padding: 0;
+                margin-left: 8px;
+                font-size: 12px;
+            ">
+                <i class="fas fa-times"></i>
+            </button>
+        `;
+        
+        document.body.appendChild(indicator);
+        
+        // 3秒后自动淡出
+        setTimeout(() => {
+            if (indicator.parentNode) {
+                indicator.style.opacity = '0.7';
+            }
+        }, 3000);
+    }
+}
+
+// 清空剪贴板
+function clearClipboard() {
+    clipboard.item = null;
+    clipboard.operation = null;
+    
+    document.querySelectorAll('.clipboard-cut, .clipboard-copy').forEach(el => {
+        el.classList.remove('clipboard-cut', 'clipboard-copy');
+    });
+    
+    // 移除剪贴板指示器
+    const indicator = document.querySelector('.clipboard-indicator');
+    if (indicator) {
+        indicator.style.transform = 'translateX(100%)';
+        indicator.style.opacity = '0';
+        setTimeout(() => {
+            if (indicator.parentNode) {
+                indicator.parentNode.removeChild(indicator);
+            }
+        }, 300);
+    }
+    
+    showNotification('剪贴板已清空', 'info');
+}
+
+// 设置键盘快捷键
+function setupKeyboardShortcuts() {
+    document.addEventListener('keydown', function(e) {
+        // 检查是否在输入框中
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.contentEditable === 'true') {
+            return;
+        }
+        
+        // Ctrl+C: 复制
+        if (e.ctrlKey && e.key === 'c') {
+            e.preventDefault();
+            const selectedItem = getSelectedTreeItem();
+            if (selectedItem) {
+                copyItem(selectedItem.path, selectedItem.type);
+            }
+        }
+        
+        // Ctrl+X: 剪切
+        if (e.ctrlKey && e.key === 'x') {
+            e.preventDefault();
+            const selectedItem = getSelectedTreeItem();
+            if (selectedItem) {
+                cutItem(selectedItem.path, selectedItem.type);
+            }
+        }
+        
+        // Ctrl+V: 粘贴
+        if (e.ctrlKey && e.key === 'v') {
+            e.preventDefault();
+            const selectedItem = getSelectedTreeItem();
+            const targetPath = selectedItem && selectedItem.type === 'directory' ? selectedItem.path : '';
+            pasteItem(targetPath);
+        }
+        
+        // Delete: 删除
+        if (e.key === 'Delete') {
+            e.preventDefault();
+            const selectedItem = getSelectedTreeItem();
+            if (selectedItem) {
+                if (selectedItem.type === 'file') {
+                    deleteFile(selectedItem.path);
+                } else {
+                    deleteFolder(selectedItem.path);
+                }
+            }
+        }
+        
+        // F1: 显示快捷键帮助
+        if (e.key === 'F1') {
+            e.preventDefault();
+            showKeyboardShortcutsHelp();
+        }
+        
+        // Escape: 清空剪贴板或关闭帮助
+        if (e.key === 'Escape') {
+            const helpDialog = document.querySelector('.shortcuts-help');
+            if (helpDialog) {
+                helpDialog.remove();
+            } else if (clipboard.item) {
+                clearClipboard();
+            }
+        }
+    });
+}
+
+// 显示键盘快捷键帮助
+function showKeyboardShortcutsHelp() {
+    // 移除现有的帮助对话框
+    const existingHelp = document.querySelector('.shortcuts-help');
+    if (existingHelp) {
+        existingHelp.remove();
+        return;
+    }
+    
+    const helpDialog = document.createElement('div');
+    helpDialog.className = 'shortcuts-help';
+    helpDialog.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 2000;
+        animation: fadeIn 0.3s ease;
+    `;
+    
+    helpDialog.innerHTML = `
+        <div style="
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            transform: scale(0.9);
+            animation: scaleIn 0.3s ease forwards;
+        ">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 25px;">
+                <h3 style="margin: 0; color: #2c3e50; display: flex; align-items: center;">
+                    <i class="fas fa-keyboard" style="margin-right: 10px; color: #3498db;"></i>
+                    键盘快捷键
+                </h3>
+                <button onclick="this.closest('.shortcuts-help').remove()" style="
+                    background: none;
+                    border: none;
+                    font-size: 20px;
+                    color: #999;
+                    cursor: pointer;
+                    padding: 5px;
+                    border-radius: 50%;
+                    transition: all 0.2s ease;
+                " onmouseover="this.style.background='#f0f0f0'" onmouseout="this.style.background='none'">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div style="display: grid; gap: 20px;">
+                <div>
+                    <h4 style="color: #34495e; margin: 0 0 12px 0; display: flex; align-items: center;">
+                        <i class="fas fa-copy" style="margin-right: 8px; color: #27ae60; width: 16px;"></i>
+                        剪贴板操作
+                    </h4>
+                    <div style="display: grid; gap: 8px; margin-left: 24px;">
+                        <div style="display: flex; align-items: center; justify-content: space-between;">
+                            <span>复制选中项</span>
+                            <kbd style="background: #f8f9fa; border: 1px solid #ddd; padding: 4px 8px; border-radius: 4px; font-size: 12px;">Ctrl + C</kbd>
+                        </div>
+                        <div style="display: flex; align-items: center; justify-content: space-between;">
+                            <span>剪切选中项</span>
+                            <kbd style="background: #f8f9fa; border: 1px solid #ddd; padding: 4px 8px; border-radius: 4px; font-size: 12px;">Ctrl + X</kbd>
+                        </div>
+                        <div style="display: flex; align-items: center; justify-content: space-between;">
+                            <span>粘贴到选中目录</span>
+                            <kbd style="background: #f8f9fa; border: 1px solid #ddd; padding: 4px 8px; border-radius: 4px; font-size: 12px;">Ctrl + V</kbd>
+                        </div>
+                    </div>
+                </div>
+                
+                <div>
+                    <h4 style="color: #34495e; margin: 0 0 12px 0; display: flex; align-items: center;">
+                        <i class="fas fa-trash" style="margin-right: 8px; color: #e74c3c; width: 16px;"></i>
+                        删除操作
+                    </h4>
+                    <div style="margin-left: 24px;">
+                        <div style="display: flex; align-items: center; justify-content: space-between;">
+                            <span>删除选中项</span>
+                            <kbd style="background: #f8f9fa; border: 1px solid #ddd; padding: 4px 8px; border-radius: 4px; font-size: 12px;">Delete</kbd>
+                        </div>
+                    </div>
+                </div>
+                
+                <div>
+                    <h4 style="color: #34495e; margin: 0 0 12px 0; display: flex; align-items: center;">
+                        <i class="fas fa-mouse" style="margin-right: 8px; color: #9b59b6; width: 16px;"></i>
+                        鼠标操作
+                    </h4>
+                    <div style="display: grid; gap: 8px; margin-left: 24px;">
+                        <div>拖拽文件/文件夹到目标目录</div>
+                        <div>右键点击显示上下文菜单</div>
+                        <div>右键点击空白区域显示根目录菜单</div>
+                    </div>
+                </div>
+                
+                <div>
+                    <h4 style="color: #34495e; margin: 0 0 12px 0; display: flex; align-items: center;">
+                        <i class="fas fa-tools" style="margin-right: 8px; color: #f39c12; width: 16px;"></i>
+                        其他快捷键
+                    </h4>
+                    <div style="display: grid; gap: 8px; margin-left: 24px;">
+                        <div style="display: flex; align-items: center; justify-content: space-between;">
+                            <span>显示/隐藏此帮助</span>
+                            <kbd style="background: #f8f9fa; border: 1px solid #ddd; padding: 4px 8px; border-radius: 4px; font-size: 12px;">F1</kbd>
+                        </div>
+                        <div style="display: flex; align-items: center; justify-content: space-between;">
+                            <span>清空剪贴板/关闭帮助</span>
+                            <kbd style="background: #f8f9fa; border: 1px solid #ddd; padding: 4px 8px; border-radius: 4px; font-size: 12px;">Escape</kbd>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="text-align: center; margin-top: 25px; padding-top: 20px; border-top: 1px solid #eee;">
+                <small style="color: #666;">
+                    <i class="fas fa-lightbulb" style="margin-right: 5px; color: #f39c12;"></i>
+                    提示：选中文件夹后创建的新文件/文件夹会自动放在该文件夹内
+                </small>
+            </div>
+        </div>
+    `;
+    
+    // 添加动画样式
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        @keyframes scaleIn {
+            from { transform: scale(0.9); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+    `;
+    document.head.appendChild(style);
+    
+    document.body.appendChild(helpDialog);
+    
+    // 点击背景关闭
+    helpDialog.addEventListener('click', function(e) {
+        if (e.target === helpDialog) {
+            helpDialog.remove();
+        }
+    });
+}
+
+// 获取当前选中的文件树项目
+function getSelectedTreeItem() {
+    const selectedElement = document.querySelector('.tree-item.selected');
+    if (!selectedElement) return null;
+    
+    const path = selectedElement.getAttribute('data-path');
+    const isDirectory = selectedElement.classList.contains('directory');
+    
+    return {
+        path: path,
+        type: isDirectory ? 'directory' : 'file',
+        name: path.split('/').pop()
+    };
 }
