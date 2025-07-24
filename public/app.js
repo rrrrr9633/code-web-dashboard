@@ -6821,13 +6821,83 @@ async function sendChatMessage() {
     const chatInput = document.getElementById('chatInput');
     const message = chatInput.value.trim();
     
-    if (!message) return;
+    // 如果没有消息且没有文件上下文，则不发送
+    if (!message && !window.currentFileContext) return;
     
     // 检查认证
     const token = localStorage.getItem('authToken');
     if (!token) {
         alert('请先登录');
         return;
+    }
+    
+    // 检查是否有文件上下文
+    let finalMessage = message;
+    let contextInfo = {
+        currentProject: currentProject ? {
+            id: currentProject.id,
+            name: currentProject.name,
+            path: currentProject.path
+        } : null,
+        currentFile: currentFile || null,
+        currentFileContent: currentFileContent || null
+    };
+    
+    // 处理文件分析请求
+    if (window.currentFileContext) {
+        const fileContext = window.currentFileContext;
+        
+        // 检查用户是否输入了自定义需求
+        const hasCustomRequest = message && message.length > 0;
+        
+        if (hasCustomRequest) {
+            // 用户输入了自定义需求，结合文件内容
+            finalMessage = fileContext.template + message;
+            
+            // 显示用户自定义需求消息
+            const userDisplayMessage = `关于文件 "${fileContext.fileName}": ${message}`;
+            const fileMessage = `
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                    <i class="${fileContext.fileInfo.icon}" style="color: ${fileContext.fileInfo.color}; font-size: 16px;"></i>
+                    <div style="font-weight: bold; color: #333;">${fileContext.fileName}</div>
+                    <div style="font-size: 12px; color: #666;">• ${fileContext.fileInfo.name}</div>
+                </div>
+                <div style="color: #555;">
+                    ${userDisplayMessage}
+                </div>
+            `;
+            addChatMessage('user', fileMessage, true);
+        } else {
+            // 用户没有输入需求，使用默认分析
+            finalMessage = fileContext.template + `请分析这个文件的内容，包括功能、结构和改进建议。`;
+            
+            // 显示默认分析消息
+            const defaultMessage = `请分析文件 "${fileContext.fileName}" 的内容，包括功能、结构和改进建议`;
+            const fileMessage = `
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                    <i class="${fileContext.fileInfo.icon}" style="color: ${fileContext.fileInfo.color}; font-size: 16px;"></i>
+                    <div style="font-weight: bold; color: #333;">${fileContext.fileName}</div>
+                    <div style="font-size: 12px; color: #666;">• ${fileContext.fileInfo.name}</div>
+                </div>
+                <div style="color: #555;">
+                    ${defaultMessage}
+                </div>
+            `;
+            addChatMessage('user', fileMessage, true);
+        }
+        
+        // 更新上下文信息
+        contextInfo.currentFile = fileContext.filePath;
+        contextInfo.currentFileContent = fileContext.fileContent;
+        
+        // 清空当前文件上下文
+        window.currentFileContext = null;
+        
+        // 重置输入框占位符
+        chatInput.placeholder = '输入您的问题... (Shift+Enter 换行)';
+    } else {
+        // 普通消息，直接添加
+        addChatMessage('user', message);
     }
     
     // 清空输入框并禁用发送按钮
@@ -6846,24 +6916,48 @@ async function sendChatMessage() {
         container.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
     }
     
-    // 添加用户消息到界面
-    addChatMessage('user', message);
+    // 添加加载消息，包含取消按钮
+    const loadingMessage = addChatMessage('ai', '正在思考中...', false);
     
-    // 添加加载消息
-    const loadingMessage = addChatMessage('ai', '正在思考中...');
+    // 创建取消按钮
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'cancel-analysis-btn';
+    cancelBtn.innerHTML = '<i class="fas fa-times"></i> 取消分析';
+    cancelBtn.style.cssText = `
+        background: #dc3545;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        padding: 4px 8px;
+        font-size: 12px;
+        cursor: pointer;
+        margin-left: 10px;
+        transition: background 0.2s ease;
+    `;
+    cancelBtn.onmouseover = () => cancelBtn.style.background = '#c82333';
+    cancelBtn.onmouseout = () => cancelBtn.style.background = '#dc3545';
+    
+    // 添加取消按钮到加载消息
+    loadingMessage.appendChild(cancelBtn);
+    
+    // 创建AbortController用于取消请求
+    const abortController = new AbortController();
+    let isCancelled = false;
+    
+    // 取消按钮点击事件
+    cancelBtn.addEventListener('click', () => {
+        isCancelled = true;
+        abortController.abort();
+        loadingMessage.textContent = '❌ 分析已取消';
+        loadingMessage.style.color = '#dc3545';
+        
+        // 重新启用发送按钮
+        sendBtn.disabled = false;
+        
+        showNotification('AI分析已取消', 'info');
+    });
     
     try {
-        // 收集当前上下文信息
-        const contextInfo = {
-            currentProject: currentProject ? {
-                id: currentProject.id,
-                name: currentProject.name,
-                path: currentProject.path
-            } : null,
-            currentFile: currentFile || null,
-            currentFileContent: currentFileContent || null
-        };
-        
         // 发送到后端API
         const response = await fetch('/api/chat', {
             method: 'POST',
@@ -6872,14 +6966,20 @@ async function sendChatMessage() {
                 'Authorization': `Bearer ${token}`
             },
             body: JSON.stringify({ 
-                message,
+                message: finalMessage,
                 context: contextInfo
-            })
+            }),
+            signal: abortController.signal
         });
         
         const data = await response.json();
         
         console.log('AI聊天响应:', { status: response.status, data });
+        
+        // 检查是否已被取消
+        if (isCancelled) {
+            return;
+        }
         
         if (response.ok) {
             // 移除加载消息
@@ -6900,7 +7000,17 @@ async function sendChatMessage() {
         }
     } catch (error) {
         console.error('发送消息失败:', error);
-        loadingMessage.textContent = '网络错误，请稍后重试';
+        
+        // 检查是否是取消操作
+        if (error.name === 'AbortError') {
+            // 请求被取消，不需要做任何事情，因为取消按钮已经处理了
+            return;
+        }
+        
+        // 只有在未取消的情况下才显示错误消息
+        if (!isCancelled) {
+            loadingMessage.textContent = '网络错误，请稍后重试';
+        }
     } finally {
         // 重新启用发送按钮
         sendBtn.disabled = false;
@@ -7528,7 +7638,7 @@ function applyContentToEditor(content) {
 }
 
 // 添加聊天消息到界面
-function addChatMessage(sender, content) {
+function addChatMessage(sender, content, isHTML = false) {
     const chatMessagesContainer = document.getElementById('chatMessages');
     
     // 移除欢迎消息（如果存在）
@@ -7540,15 +7650,20 @@ function addChatMessage(sender, content) {
     // 创建消息元素
     const messageElement = document.createElement('div');
     messageElement.className = `chat-message ${sender}`;
-    messageElement.textContent = content;
+    
+    if (isHTML) {
+        messageElement.innerHTML = content;
+    } else {
+        messageElement.textContent = content;
+    }
     
     chatMessagesContainer.appendChild(messageElement);
     
-    // 添加到消息数组
+    // 添加到消息数组（存储纯文本版本）
     if (sender === 'user' || (sender === 'ai' && content !== '正在思考中...')) {
         chatMessages.push({
             sender,
-            content,
+            content: isHTML ? messageElement.textContent : content,
             timestamp: new Date().toISOString()
         });
     }
@@ -7798,14 +7913,17 @@ function setupChatInput() {
     // 监听输入变化
     chatInput.addEventListener('input', function() {
         const hasContent = this.value.trim().length > 0;
-        sendBtn.disabled = !hasContent;
+        const hasFileContext = window.currentFileContext !== null && window.currentFileContext !== undefined;
+        
+        // 如果有内容或有文件上下文，则启用发送按钮
+        sendBtn.disabled = !hasContent && !hasFileContext;
         
         // 自动调整高度
         adjustHeight();
         
         // 添加打字效果的视觉反馈
         const container = this.closest('.chat-input-container');
-        if (hasContent) {
+        if (hasContent || hasFileContext) {
             container.style.borderColor = '#4CAF50';
         } else {
             container.style.borderColor = '#d0d7de';
@@ -8257,14 +8375,62 @@ function addCurrentFileToAIChat() {
         openAIChatPanel();
     }
     
-    // 构造消息
-    const message = `请帮我分析当前文件 "${currentFile}"，包括它的功能、结构和可能的改进建议。`;
+    // 获取文件内容（如果当前文件内容不存在，尝试从DOM获取）
+    let fileContent = currentFileContent || '';
+    if (!fileContent) {
+        const fileContentDiv = document.getElementById('fileContent');
+        if (fileContentDiv) {
+            fileContent = fileContentDiv.textContent || '';
+        }
+    }
+    
+    // 检测文件语言类型
+    const fileExtension = currentFile.split('.').pop().toLowerCase();
+    const languageMap = {
+        'js': 'javascript',
+        'ts': 'typescript',
+        'py': 'python',
+        'cpp': 'cpp',
+        'c': 'c',
+        'java': 'java',
+        'php': 'php',
+        'html': 'html',
+        'css': 'css',
+        'json': 'json',
+        'xml': 'xml',
+        'sql': 'sql',
+        'sh': 'bash',
+        'md': 'markdown',
+        'txt': 'text'
+    };
+    const language = languageMap[fileExtension] || 'text';
+    
+    // 构造带完整文件内容的消息
+    const message = `请帮我分析以下当前打开文件的内容：
+
+**文件路径：** \`${currentFile}\`
+**文件类型：** ${language}
+**文件大小：** ${fileContent.length} 字符
+
+\`\`\`${language}
+${fileContent}
+\`\`\`
+
+请分析这个文件的：
+1. 主要功能和目的
+2. 代码结构和组织方式
+3. 关键函数/方法的作用
+4. 潜在的问题或改进建议
+5. 代码质量和最佳实践建议`;
     
     // 填充到输入框
     const chatInput = document.getElementById('chatInput');
     if (chatInput) {
         chatInput.value = message;
         chatInput.focus();
+        
+        // 触发高度调整
+        chatInput.dispatchEvent(new Event('input'));
         
         // 启用发送按钮
         const sendBtn = document.querySelector('.send-btn');
@@ -8273,7 +8439,7 @@ function addCurrentFileToAIChat() {
         }
     }
     
-    showNotification('当前文件已添加到AI对话框', 'success');
+    showNotification('当前文件内容已添加到AI对话框', 'success');
 }
 
 // 分析当前代码
@@ -8282,8 +8448,8 @@ function analyzeCurrentCode() {
     const menu = document.querySelector('.code-selection-menu');
     if (menu) menu.remove();
     
-    if (!currentFile || !currentFileContent) {
-        showNotification('没有可分析的代码内容', 'warning');
+    if (!currentFile) {
+        showNotification('没有可分析的代码文件', 'warning');
         return;
     }
     
@@ -8293,18 +8459,88 @@ function analyzeCurrentCode() {
         openAIChatPanel();
     }
     
-    // 构造消息
-    const message = `请帮我详细分析当前文件 "${currentFile}" 的代码，包括：
-1. 代码的主要功能和目的
-2. 代码结构和设计模式
-3. 潜在的问题或改进建议
-4. 性能优化建议`;
+    // 获取文件内容
+    let fileContent = currentFileContent || '';
+    if (!fileContent) {
+        const fileContentDiv = document.getElementById('fileContent');
+        if (fileContentDiv) {
+            fileContent = fileContentDiv.textContent || '';
+        }
+    }
+    
+    if (!fileContent.trim()) {
+        showNotification('没有可分析的代码内容', 'warning');
+        return;
+    }
+    
+    // 检测文件语言类型
+    const fileExtension = currentFile.split('.').pop().toLowerCase();
+    const languageMap = {
+        'js': 'javascript',
+        'ts': 'typescript',
+        'py': 'python',
+        'cpp': 'cpp',
+        'c': 'c',
+        'java': 'java',
+        'php': 'php',
+        'html': 'html',
+        'css': 'css',
+        'json': 'json',
+        'xml': 'xml',
+        'sql': 'sql',
+        'sh': 'bash',
+        'md': 'markdown',
+        'txt': 'text'
+    };
+    const language = languageMap[fileExtension] || 'text';
+    
+    // 构造带完整代码内容的详细分析消息
+    const message = `请详细分析以下代码文件：
+
+**文件路径：** \`${currentFile}\`
+**文件类型：** ${language}
+**文件大小：** ${fileContent.length} 字符
+
+\`\`\`${language}
+${fileContent}
+\`\`\`
+
+请从以下几个方面进行深入分析：
+
+🔍 **功能分析**
+- 代码的主要功能和目的
+- 实现的业务逻辑
+
+🏗️ **结构分析**
+- 代码架构和组织方式
+- 使用的设计模式
+- 模块化程度
+
+⚡ **性能分析**
+- 潜在的性能瓶颈
+- 优化建议
+
+🐛 **问题识别**
+- 潜在的bug或问题
+- 代码异味(Code Smells)
+
+💡 **改进建议**
+- 代码质量提升建议
+- 最佳实践建议
+- 重构建议
+
+🔒 **安全性**
+- 潜在的安全风险
+- 安全最佳实践建议`;
     
     // 填充到输入框
     const chatInput = document.getElementById('chatInput');
     if (chatInput) {
         chatInput.value = message;
         chatInput.focus();
+        
+        // 触发高度调整
+        chatInput.dispatchEvent(new Event('input'));
         
         // 启用发送按钮
         const sendBtn = document.querySelector('.send-btn');
@@ -8313,11 +8549,79 @@ function analyzeCurrentCode() {
         }
     }
     
-    showNotification('代码分析请求已添加到AI对话框', 'success');
+    showNotification('代码详细分析请求已添加到AI对话框', 'success');
+}
+
+// 获取文件类型图标和颜色
+function getFileTypeIcon(filePath) {
+    const extension = filePath.split('.').pop().toLowerCase();
+    const iconMap = {
+        // 编程语言
+        'js': { icon: 'fab fa-js-square', color: '#f7df1e', name: 'JavaScript' },
+        'ts': { icon: 'fab fa-js-square', color: '#3178c6', name: 'TypeScript' },
+        'py': { icon: 'fab fa-python', color: '#3776ab', name: 'Python' },
+        'java': { icon: 'fab fa-java', color: '#ed8b00', name: 'Java' },
+        'cpp': { icon: 'fas fa-code', color: '#659ad2', name: 'C++' },
+        'c': { icon: 'fas fa-code', color: '#659ad2', name: 'C' },
+        'php': { icon: 'fab fa-php', color: '#777bb4', name: 'PHP' },
+        'rb': { icon: 'fas fa-gem', color: '#cc342d', name: 'Ruby' },
+        'go': { icon: 'fas fa-code', color: '#00add8', name: 'Go' },
+        'rs': { icon: 'fas fa-cog', color: '#ce422b', name: 'Rust' },
+        
+        // Web技术
+        'html': { icon: 'fab fa-html5', color: '#e34c26', name: 'HTML' },
+        'css': { icon: 'fab fa-css3-alt', color: '#1572b6', name: 'CSS' },
+        'scss': { icon: 'fab fa-sass', color: '#cf649a', name: 'SCSS' },
+        'less': { icon: 'fas fa-code', color: '#1d365d', name: 'LESS' },
+        'vue': { icon: 'fab fa-vuejs', color: '#4fc08d', name: 'Vue' },
+        'jsx': { icon: 'fab fa-react', color: '#61dafb', name: 'React JSX' },
+        'tsx': { icon: 'fab fa-react', color: '#61dafb', name: 'React TSX' },
+        
+        // 数据格式
+        'json': { icon: 'fas fa-brackets-curly', color: '#cbcb41', name: 'JSON' },
+        'xml': { icon: 'fas fa-code', color: '#ff6600', name: 'XML' },
+        'yaml': { icon: 'fas fa-code', color: '#cb171e', name: 'YAML' },
+        'yml': { icon: 'fas fa-code', color: '#cb171e', name: 'YAML' },
+        'csv': { icon: 'fas fa-table', color: '#0f9d58', name: 'CSV' },
+        
+        // 数据库
+        'sql': { icon: 'fas fa-database', color: '#336791', name: 'SQL' },
+        'db': { icon: 'fas fa-database', color: '#336791', name: 'Database' },
+        'sqlite': { icon: 'fas fa-database', color: '#003b57', name: 'SQLite' },
+        
+        // 脚本和配置
+        'sh': { icon: 'fas fa-terminal', color: '#4eaa25', name: 'Shell Script' },
+        'bash': { icon: 'fas fa-terminal', color: '#4eaa25', name: 'Bash Script' },
+        'ps1': { icon: 'fas fa-terminal', color: '#012456', name: 'PowerShell' },
+        'bat': { icon: 'fas fa-terminal', color: '#c1c1c1', name: 'Batch File' },
+        'dockerfile': { icon: 'fab fa-docker', color: '#2496ed', name: 'Dockerfile' },
+        
+        // 文档
+        'md': { icon: 'fab fa-markdown', color: '#083fa1', name: 'Markdown' },
+        'txt': { icon: 'fas fa-file-alt', color: '#6c757d', name: 'Text File' },
+        'pdf': { icon: 'fas fa-file-pdf', color: '#ff0000', name: 'PDF' },
+        'doc': { icon: 'fas fa-file-word', color: '#2b579a', name: 'Word Document' },
+        'docx': { icon: 'fas fa-file-word', color: '#2b579a', name: 'Word Document' },
+        
+        // 图片
+        'png': { icon: 'fas fa-file-image', color: '#ff6b35', name: 'PNG Image' },
+        'jpg': { icon: 'fas fa-file-image', color: '#ff6b35', name: 'JPEG Image' },
+        'jpeg': { icon: 'fas fa-file-image', color: '#ff6b35', name: 'JPEG Image' },
+        'gif': { icon: 'fas fa-file-image', color: '#ff6b35', name: 'GIF Image' },
+        'svg': { icon: 'fas fa-file-image', color: '#ff9500', name: 'SVG Image' },
+        
+        // 其他
+        'zip': { icon: 'fas fa-file-archive', color: '#ffc107', name: 'ZIP Archive' },
+        'tar': { icon: 'fas fa-file-archive', color: '#ffc107', name: 'TAR Archive' },
+        'gz': { icon: 'fas fa-file-archive', color: '#ffc107', name: 'GZ Archive' },
+        'log': { icon: 'fas fa-file-alt', color: '#6c757d', name: 'Log File' }
+    };
+    
+    return iconMap[extension] || { icon: 'fas fa-file', color: '#6c757d', name: 'File' };
 }
 
 // 添加文件到AI对话
-function addFileToAIChat(filePath) {
+async function addFileToAIChat(filePath) {
     if (!currentProject) {
         showNotification('没有选择项目', 'error');
         return;
@@ -8329,21 +8633,126 @@ function addFileToAIChat(filePath) {
         openAIChatPanel();
     }
     
-    // 构造消息
-    const message = `请帮我分析文件 "${filePath}"，包括它的功能、结构和可能的改进建议。`;
-    
-    // 填充到输入框
-    const chatInput = document.getElementById('chatInput');
-    if (chatInput) {
-        chatInput.value = message;
-        chatInput.focus();
+    try {
+        // 显示加载提示
+        showNotification('正在读取文件内容...', 'info');
         
-        // 启用发送按钮
-        const sendBtn = document.querySelector('.send-btn');
-        if (sendBtn) {
-            sendBtn.disabled = false;
+        // 获取文件类型信息
+        const fileInfo = getFileTypeIcon(filePath);
+        const fileName = filePath.split('/').pop();
+        
+        // 获取文件内容
+        const sessionToken = localStorage.getItem('authToken');
+        const response = await fetch(`/api/projects/${currentProject.id}/files/${encodeURIComponent(filePath)}`, {
+            headers: {
+                'Authorization': `Bearer ${sessionToken}`
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error('无法读取文件内容');
         }
+        
+        const fileData = await response.json();
+        const fileContent = fileData.content || '';
+        
+        // 检测文件语言类型
+        const fileExtension = filePath.split('.').pop().toLowerCase();
+        const languageMap = {
+            'js': 'javascript',
+            'ts': 'typescript',
+            'py': 'python',
+            'cpp': 'cpp',
+            'c': 'c',
+            'java': 'java',
+            'php': 'php',
+            'html': 'html',
+            'css': 'css',
+            'json': 'json',
+            'xml': 'xml',
+            'sql': 'sql',
+            'sh': 'bash',
+            'md': 'markdown',
+            'txt': 'text'
+        };
+        const language = languageMap[fileExtension] || 'text';
+        
+        // 构造完整的文件分析消息模板
+        const fileAnalysisTemplate = `请分析以下文件：
+
+**文件路径：** \`${filePath}\`
+**文件类型：** ${language}
+**文件大小：** ${fileContent.length} 字符
+
+\`\`\`${language}
+${fileContent}
+\`\`\`
+
+`;
+        
+        // 将文件信息存储到全局变量，供发送时使用
+        window.currentFileContext = {
+            filePath: filePath,
+            fileName: fileName,
+            fileInfo: fileInfo,
+            fileContent: fileContent,
+            language: language,
+            template: fileAnalysisTemplate
+        };
+        
+        // 清空输入框，等待用户输入或直接发送
+        const chatInput = document.getElementById('chatInput');
+        if (chatInput) {
+            chatInput.value = '';
+            chatInput.placeholder = `文件 ${fileName} 已加载，输入需求或直接发送进行默认分析`;
+            chatInput.focus();
+            
+            // 启用发送按钮
+            const sendBtn = document.querySelector('.send-btn');
+            if (sendBtn) {
+                sendBtn.disabled = false;
+            }
+        }
+        
+        // 在聊天区域添加文件卡片提示
+        const fileCardMessage = `
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px; padding: 12px; background: #f0f8ff; border: 1px solid #b3d9ff; border-radius: 8px;">
+                <i class="${fileInfo.icon}" style="color: ${fileInfo.color}; font-size: 20px;"></i>
+                <div style="flex: 1;">
+                    <div style="font-weight: bold; color: #333; margin-bottom: 2px;">${fileName}</div>
+                    <div style="font-size: 12px; color: #666;">${fileInfo.name} • ${filePath} • ${fileContent.length} 字符</div>
+                </div>
+                <div style="font-size: 12px; color: #0066cc; font-weight: bold;">
+                    已加载到待分析
+                </div>
+            </div>
+        `;
+        
+        addChatMessage('system', fileCardMessage, true);
+        
+        showNotification(`文件 "${fileName}" 已加载，请输入分析需求`, 'success');
+        
+    } catch (error) {
+        console.error('加载文件失败:', error);
+        showNotification(`加载文件失败: ${error.message}`, 'error');
+        
+        // 如果读取失败，添加一个简单的错误提示
+        const fileInfo = getFileTypeIcon(filePath);
+        const fileName = filePath.split('/').pop();
+        
+        const errorMessage = `
+            <div style="display: flex; align-items: center; gap: 8px; padding: 12px; background: #fff5f5; border: 1px solid #ffcdd2; border-radius: 8px;">
+                <i class="${fileInfo.icon}" style="color: ${fileInfo.color}; font-size: 20px;"></i>
+                <div style="flex: 1;">
+                    <div style="font-weight: bold; color: #333;">${fileName}</div>
+                    <div style="font-size: 12px; color: #666;">${fileInfo.name} • ${filePath}</div>
+                </div>
+                <div style="color: #e74c3c; font-size: 12px;">
+                    ❌ 加载失败
+                </div>
+            </div>
+        `;
+        
+        addChatMessage('system', errorMessage, true);
     }
-    
-    showNotification(`文件 "${filePath}" 已添加到AI对话框`, 'success');
 }
