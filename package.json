@@ -1,7 +1,7 @@
 {
-  "name": "flowmq-code-viewer",
+  "name": "code-viewer",
   "version": "1.0.0",
-  "description": "FlowMQ项目代码可视化界面",
+  "description": "代码可视化界面",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -22,10 +22,9 @@
     "nodemon": "^3.0.2"
   },
   "keywords": [
-    "flowmq",
     "code-viewer",
     "visualization"
   ],
-  "author": "FlowMQ Code Viewer",
+  "author": "Code Viewer",
   "license": "MIT"
 }

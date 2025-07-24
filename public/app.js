@@ -1867,7 +1867,7 @@ async function analyzeProject() {
             const shouldReanalyze = await showAnalysisOptionsDialog(existingConfig.config);
             if (!shouldReanalyze) {
                 // 用户选择使用现有配置，显示现有的分析结果
-                showExistingAnalysisResult(existingConfig.config);
+                showExistingAnalysisResult(existingConfig.config, currentProject.id);
                 return;
             }
         }
@@ -1946,7 +1946,7 @@ function resolveAnalysisOptions(shouldReanalyze) {
 }
 
 // 显示现有分析结果
-function showExistingAnalysisResult(config) {
+function showExistingAnalysisResult(config, projectId) {
     const aiPanel = document.getElementById('aiPanel');
     const aiContent = document.getElementById('aiContent');
     
@@ -1965,7 +1965,7 @@ function showExistingAnalysisResult(config) {
         displayContent += `
             <div class="restructure-section">
                 <p class="restructure-info">当前项目已应用AI重组配置，目录结构已优化。</p>
-                <button class="restructure-btn reset-btn" onclick="resetProjectRestructure('${currentProject.id}')">
+                <button class="restructure-btn reset-btn" onclick="resetProjectRestructure('${projectId}')">
                     <i class="fas fa-undo"></i> 重置为原始结构
                 </button>
                 <button class="restructure-btn reanalyze-btn" onclick="analyzeProject()">
@@ -2208,13 +2208,18 @@ async function applyProjectRestructure(projectId, encodedMapping) {
             throw new Error('保存重组配置失败');
         }
         
-        // 重新加载项目结构（现在会应用保存的重组配置）
-        await loadProjectStructure(project);
+        // 只有当重组的项目是当前选中的项目时，才重新加载项目结构
+        if (currentProject && currentProject.id === projectId) {
+            console.log('🔄 重组的项目是当前项目，重新加载结构');
+            await loadProjectStructure(project);
+        } else {
+            console.log('ℹ️ 重组的项目不是当前项目，不重新加载结构');
+        }
         
         // 更新状态显示
         updateProjectRestructureStatus(projectId, true);
         
-        showNotification('目录重组已保存并应用', 'success');
+        showNotification(`项目 "${project.name}" 的目录重组已保存`, 'success');
         
     } catch (error) {
         console.error('应用目录重组失败:', error);
@@ -2244,16 +2249,20 @@ async function resetProjectRestructure(projectId) {
             throw new Error('删除重组配置失败');
         }
         
-        // 重新加载项目结构
+        // 只有当重置的项目是当前选中的项目时，才重新加载项目结构
         const project = projects.find(p => p.id === projectId);
-        if (project) {
+        if (project && currentProject && currentProject.id === projectId) {
+            console.log('🔄 重置的项目是当前项目，重新加载结构');
             await loadProjectStructure(project);
+        } else {
+            console.log('ℹ️ 重置的项目不是当前项目，不重新加载结构');
         }
         
         // 更新状态显示
         updateProjectRestructureStatus(projectId, false);
         
-        showNotification('目录结构已重置为原始状态', 'success');
+        const projectName = project ? project.name : '未知项目';
+        showNotification(`项目 "${projectName}" 的目录结构已重置为原始状态`, 'success');
         
     } catch (error) {
         console.error('重置目录结构失败:', error);
@@ -2272,15 +2281,32 @@ function categorizeProjectStructure(structure, mapping) {
         return structure;
     }
     
+    // 验证映射配置的完整性
     const categories = mapping.categories;
+    const validCategories = {};
+    
+    Object.keys(categories).forEach(categoryName => {
+        const category = categories[categoryName];
+        if (category && category.directories && Array.isArray(category.directories)) {
+            validCategories[categoryName] = category;
+        } else {
+            console.warn(`⚠️ 跳过无效的分类配置 "${categoryName}":`, category);
+        }
+    });
+    
+    if (Object.keys(validCategories).length === 0) {
+        console.log('⚠️ 没有有效的分类配置，返回原始结构');
+        return structure;
+    }
+    
     const categorizedStructure = [];
     const uncategorized = [];
     
-    console.log('📚 可用分类:', Object.keys(categories));
+    console.log('📚 有效分类:', Object.keys(validCategories));
     
     // 为每个分类创建容器
-    Object.keys(categories).forEach(categoryName => {
-        const category = categories[categoryName];
+    Object.keys(validCategories).forEach(categoryName => {
+        const category = validCategories[categoryName];
         console.log(`🏷️ 处理分类: ${categoryName}`, category);
         
         const categoryContainer = {
@@ -2296,6 +2322,11 @@ function categorizeProjectStructure(structure, mapping) {
         structure.forEach(item => {
             if (item.type === 'directory') {
                 const itemPath = item.name + '/';
+                // 安全检查：确保 category.directories 存在且是数组
+                if (!category.directories || !Array.isArray(category.directories)) {
+                    console.warn(`⚠️ 分类 "${categoryName}" 的 directories 属性无效:`, category.directories);
+                    return;
+                }
                 const isMatched = category.directories.some(dir => {
                     const match = dir === itemPath || 
                            itemPath.toLowerCase().includes(dir.toLowerCase().replace('/', '')) ||
@@ -2327,7 +2358,11 @@ function categorizeProjectStructure(structure, mapping) {
         
         if (item.type === 'directory') {
             const itemPath = item.name + '/';
-            Object.values(categories).forEach(category => {
+            Object.values(validCategories).forEach(category => {
+                // 安全检查：确保 category.directories 存在且是数组
+                if (!category.directories || !Array.isArray(category.directories)) {
+                    return;
+                }
                 if (category.directories.some(dir => 
                     dir === itemPath || 
                     itemPath.toLowerCase().includes(dir.toLowerCase().replace('/', '')) ||
