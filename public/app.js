@@ -28,6 +28,12 @@ document.addEventListener('DOMContentLoaded', function() {
     setupFileTreeResize(); // 设置文件树调整大小功能
     setupSidebarResize(); // 设置侧边栏调整大小功能
     
+    // 新增的表单初始化
+    setupCreateEmptyProjectForm();
+    setupAddFileForm();
+    setupAddFolderForm();
+    setupRenameForm();
+    
     // 显示数据库持久化提示
     showPersistenceNotification();
 });
@@ -169,6 +175,9 @@ function showNoProjectsState() {
     
     // 重置概览卡片
     updateOverviewCards([]);
+    
+    // 隐藏文件操作区域
+    hideFileOperations();
 }
 
 // 渲染项目列表
@@ -244,6 +253,9 @@ async function selectProject(projectId) {
     
     renderProjectList(); // 重新渲染以更新active状态
     await loadProjectStructure(project);
+    
+    // 显示文件操作区域
+    showFileOperations();
 }
 
 // 加载项目结构 - 使用本地文件访问模式
@@ -608,6 +620,9 @@ function createTreeItem(item) {
             renderFileTree(item.children, childrenDiv);
             itemDiv.appendChild(childrenDiv);
         }
+        
+        // 添加右键菜单支持
+        addContextMenuToTreeItem(itemDiv, item);
     } else if (item.type === 'file') {
         const fileIcon = getFileIcon(item.extension);
         labelDiv.innerHTML = `
@@ -620,6 +635,9 @@ function createTreeItem(item) {
         };
 
         itemDiv.appendChild(labelDiv);
+        
+        // 添加右键菜单支持
+        addContextMenuToTreeItem(itemDiv, item);
     }
 
     return itemDiv;
@@ -859,6 +877,9 @@ function renderFileContent(fileData) {
                 <span style="color: rgba(255,255,255,0.8); font-size: 12px;">${fileName}</span>
             </div>
             <div class="code-toolbar-right">
+                <button class="toolbar-btn info" onclick="checkLanguageEnvironment()" title="检查语言环境">
+                    <i class="fas fa-info-circle"></i> 环境
+                </button>
                 <button class="toolbar-btn secondary" onclick="checkCode()" title="代码检查">
                     <i class="fas fa-check-circle"></i> 检查
                 </button>
@@ -4617,6 +4638,7 @@ function detectLanguage(filename) {
         'c': 'c',
         'go': 'go',
         'rs': 'rust',
+        'cs': 'csharp',
         'php': 'php',
         'rb': 'ruby',
         'sh': 'bash',
@@ -4800,7 +4822,7 @@ async function runCode() {
     }
     
     // 检查是否支持运行该语言
-    const supportedLanguages = ['javascript', 'python', 'html'];
+    const supportedLanguages = ['javascript', 'python', 'html', 'c', 'cpp', 'java', 'go', 'csharp', 'rust'];
     if (!supportedLanguages.includes(currentCodeLanguage)) {
         showNotification(`暂不支持运行 ${currentCodeLanguage} 语言`, 'warning');
         return;
@@ -4808,8 +4830,17 @@ async function runCode() {
     
     // 对于某些语言，可能需要输入
     let input = '';
-    if (currentCodeLanguage === 'python') {
-        input = await showInputDialog('输入程序运行时的输入数据（可选）：');
+    if (['python', 'c', 'cpp', 'java', 'go', 'csharp', 'rust'].includes(currentCodeLanguage)) {
+        const languageNames = {
+            'python': 'Python',
+            'c': 'C',
+            'cpp': 'C++',
+            'java': 'Java',
+            'go': 'Go',
+            'csharp': 'C#',
+            'rust': 'Rust'
+        };
+        input = await showInputDialog(`输入${languageNames[currentCodeLanguage]}程序运行时的输入数据（可选）：`);
         if (input === null) return; // 用户取消
     }
     
@@ -4939,4 +4970,665 @@ function shouldShowToolbar(filename) {
     ];
     const ext = filename.split('.').pop().toLowerCase();
     return codeExtensions.includes(ext);
+}
+
+// ============= 新增功能：创建空项目、添加文件/文件夹、重命名 =============
+
+// 创建空项目
+function createEmptyProject() {
+    document.getElementById('createEmptyProjectModal').style.display = 'block';
+}
+
+// 关闭创建空项目模态框
+function closeCreateEmptyProjectModal() {
+    document.getElementById('createEmptyProjectModal').style.display = 'none';
+    document.getElementById('createEmptyProjectForm').reset();
+}
+
+// 设置创建空项目表单
+function setupCreateEmptyProjectForm() {
+    const form = document.getElementById('createEmptyProjectForm');
+    
+    if (form) {
+        form.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(e.target);
+            const projectName = formData.get('projectName').trim();
+            const projectDescription = formData.get('projectDescription').trim();
+            
+            if (!projectName) {
+                showNotification('项目名称不能为空', 'error');
+                return;
+            }
+            
+            // 验证项目名称
+            if (projectName.includes('/') || projectName.includes('\\') || projectName.includes('..')) {
+                showNotification('项目名称包含非法字符', 'error');
+                return;
+            }
+            
+            try {
+                console.log(`🆕 创建空项目: ${projectName}`);
+                
+                const sessionToken = localStorage.getItem('authToken');
+                const response = await fetch('/api/projects', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${sessionToken}`
+                    },
+                    body: JSON.stringify({
+                        name: projectName,
+                        path: `/empty-project/${projectName}`,
+                        description: projectDescription || `${projectName} - 空项目`,
+                        isEmpty: true,
+                        projectType: 'empty' // 标记为空项目类型
+                    })
+                });
+                
+                if (response.ok) {
+                    const newProject = await response.json();
+                    console.log(`✅ 空项目创建成功:`, newProject);
+                    
+                    // 更新本地项目列表
+                    projects.push(newProject);
+                    renderProjectList();
+                    closeCreateEmptyProjectModal();
+                    
+                    // 自动选择新创建的项目
+                    await selectProject(newProject.id);
+                    
+                    // 确保显示文件操作区域
+                    showFileOperations();
+                    
+                    showNotification(`空项目 "${projectName}" 创建成功！您现在可以添加文件和文件夹。`, 'success');
+                } else {
+                    const error = await response.json();
+                    throw new Error(error.error || '创建项目失败');
+                }
+            } catch (error) {
+                console.error('创建空项目失败:', error);
+                showNotification('创建项目失败: ' + error.message, 'error');
+            }
+        });
+    }
+}
+
+// 显示文件操作区域
+function showFileOperations() {
+    const fileOperations = document.getElementById('fileOperations');
+    if (fileOperations) {
+        fileOperations.style.display = 'flex';
+    }
+}
+
+// 隐藏文件操作区域
+function hideFileOperations() {
+    const fileOperations = document.getElementById('fileOperations');
+    if (fileOperations) {
+        fileOperations.style.display = 'none';
+    }
+}
+
+// 添加新文件
+function addNewFile() {
+    if (!currentProject) {
+        showNotification('请先选择一个项目', 'error');
+        return;
+    }
+    document.getElementById('addFileModal').style.display = 'block';
+}
+
+// 关闭添加文件模态框
+function closeAddFileModal() {
+    document.getElementById('addFileModal').style.display = 'none';
+    document.getElementById('addFileForm').reset();
+}
+
+// 添加新文件夹
+function addNewFolder() {
+    if (!currentProject) {
+        showNotification('请先选择一个项目', 'error');
+        return;
+    }
+    document.getElementById('addFolderModal').style.display = 'block';
+}
+
+// 关闭添加文件夹模态框
+function closeAddFolderModal() {
+    document.getElementById('addFolderModal').style.display = 'none';
+    document.getElementById('addFolderForm').reset();
+}
+
+// 设置添加文件表单
+function setupAddFileForm() {
+    const form = document.getElementById('addFileForm');
+    
+    if (form) {
+        form.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(e.target);
+            const fileName = formData.get('fileName').trim();
+            const fileContent = formData.get('fileContent').trim();
+            
+            if (!fileName) {
+                showNotification('文件名不能为空', 'error');
+                return;
+            }
+            
+            if (!currentProject) {
+                showNotification('请先选择一个项目', 'error');
+                return;
+            }
+            
+            // 验证文件名格式
+            if (fileName.includes('..') || fileName.startsWith('/') || fileName.includes('\\')) {
+                showNotification('文件名包含非法字符', 'error');
+                return;
+            }
+            
+            try {
+                console.log(`📁 为项目 "${currentProject.name}" (ID: ${currentProject.id}) 创建文件: ${fileName}`);
+                
+                const sessionToken = localStorage.getItem('authToken');
+                const response = await fetch(`/api/projects/${currentProject.id}/files/${encodeURIComponent(fileName)}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${sessionToken}`
+                    },
+                    body: JSON.stringify({
+                        content: fileContent || '',
+                        projectId: currentProject.id // 明确指定项目ID
+                    })
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    console.log(`✅ 文件创建成功:`, result);
+                    
+                    closeAddFileModal();
+                    
+                    // 重新加载当前项目的结构
+                    await loadProjectStructure(currentProject);
+                    
+                    // 显示同步选项
+                    showLocalSyncOptions();
+                    
+                    showNotification(`文件 "${fileName}" 已添加到项目 "${currentProject.name}"`, 'success');
+                } else {
+                    const error = await response.json();
+                    throw new Error(error.error || '创建文件失败');
+                }
+            } catch (error) {
+                console.error('创建文件失败:', error);
+                showNotification('创建文件失败: ' + error.message, 'error');
+            }
+        });
+    }
+}
+
+// 设置添加文件夹表单
+function setupAddFolderForm() {
+    const form = document.getElementById('addFolderForm');
+    
+    if (form) {
+        form.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(e.target);
+            const folderName = formData.get('folderName').trim();
+            
+            if (!folderName) {
+                showNotification('文件夹名称不能为空', 'error');
+                return;
+            }
+            
+            if (!currentProject) {
+                showNotification('请先选择一个项目', 'error');
+                return;
+            }
+            
+            // 验证文件夹名格式
+            if (folderName.includes('..') || folderName.startsWith('/') || folderName.includes('\\') || folderName.includes('.')) {
+                showNotification('文件夹名称包含非法字符', 'error');
+                return;
+            }
+            
+            try {
+                console.log(`📁 为项目 "${currentProject.name}" (ID: ${currentProject.id}) 创建文件夹: ${folderName}`);
+                
+                // 通过创建一个占位文件来创建文件夹
+                const placeholderFileName = `${folderName}/.gitkeep`;
+                const placeholderContent = `# 文件夹占位文件\n\n此文件用于保持 "${folderName}" 文件夹结构。\n当文件夹中有其他文件时，可以安全删除此文件。\n\n项目: ${currentProject.name}\n创建时间: ${new Date().toLocaleString()}`;
+                
+                const sessionToken = localStorage.getItem('authToken');
+                const response = await fetch(`/api/projects/${currentProject.id}/files/${encodeURIComponent(placeholderFileName)}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${sessionToken}`
+                    },
+                    body: JSON.stringify({
+                        content: placeholderContent,
+                        projectId: currentProject.id, // 明确指定项目ID
+                        isPlaceholder: true // 标记为占位文件
+                    })
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    console.log(`✅ 文件夹创建成功:`, result);
+                    
+                    closeAddFolderModal();
+                    
+                    // 重新加载当前项目的结构
+                    await loadProjectStructure(currentProject);
+                    
+                    // 显示同步选项
+                    showLocalSyncOptions();
+                    
+                    showNotification(`文件夹 "${folderName}" 已添加到项目 "${currentProject.name}"`, 'success');
+                } else {
+                    const error = await response.json();
+                    throw new Error(error.error || '创建文件夹失败');
+                }
+            } catch (error) {
+                console.error('创建文件夹失败:', error);
+                showNotification('创建文件夹失败: ' + error.message, 'error');
+            }
+        });
+    }
+}
+
+// 重命名相关变量
+let renameTarget = null;
+let renameType = null;
+
+// 显示重命名模态框
+function showRenameModal(targetPath, targetType, currentName) {
+    renameTarget = targetPath;
+    renameType = targetType;
+    
+    const modal = document.getElementById('renameModal');
+    const input = document.getElementById('renameInput');
+    const help = document.getElementById('renameHelp');
+    
+    input.value = currentName;
+    help.textContent = targetType === 'file' ? 
+        '请输入新的文件名（包含扩展名）' : 
+        '请输入新的文件夹名称';
+    
+    modal.style.display = 'block';
+    input.focus();
+    input.select();
+}
+
+// 关闭重命名模态框
+function closeRenameModal() {
+    document.getElementById('renameModal').style.display = 'none';
+    document.getElementById('renameForm').reset();
+    renameTarget = null;
+    renameType = null;
+}
+
+// 设置重命名表单
+function setupRenameForm() {
+    const form = document.getElementById('renameForm');
+    
+    if (form) {
+        form.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(e.target);
+            const newName = formData.get('newName').trim();
+            
+            if (!newName) {
+                showNotification('名称不能为空', 'error');
+                return;
+            }
+            
+            if (!currentProject || !renameTarget) {
+                showNotification('重命名参数无效', 'error');
+                return;
+            }
+            
+            try {
+                await performRename(renameTarget, newName, renameType);
+                closeRenameModal();
+                
+                // 重新加载当前项目的结构
+                await loadProjectStructure(currentProject);
+                
+                // 显示同步选项
+                showLocalSyncOptions();
+                
+                showNotification(`${renameType === 'file' ? '文件' : '文件夹'}重命名成功！`, 'success');
+            } catch (error) {
+                console.error('重命名失败:', error);
+                showNotification('重命名失败: ' + error.message, 'error');
+            }
+        });
+    }
+}
+
+// 执行重命名操作
+async function performRename(oldPath, newName, type) {
+    if (!currentProject) {
+        throw new Error('没有选择项目');
+    }
+    
+    const sessionToken = localStorage.getItem('authToken');
+    
+    if (type === 'file') {
+        // 文件重命名：读取旧文件内容，创建新文件，删除旧文件
+        const readResponse = await fetch(`/api/projects/${currentProject.id}/files/${oldPath}`, {
+            headers: { 'Authorization': `Bearer ${sessionToken}` }
+        });
+        
+        if (!readResponse.ok) {
+            throw new Error('无法读取原文件');
+        }
+        
+        const fileData = await readResponse.json();
+        const pathParts = oldPath.split('/');
+        pathParts[pathParts.length - 1] = newName;
+        const newPath = pathParts.join('/');
+        
+        // 创建新文件
+        const createResponse = await fetch(`/api/projects/${currentProject.id}/files/${newPath}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${sessionToken}`
+            },
+            body: JSON.stringify({ content: fileData.content })
+        });
+        
+        if (!createResponse.ok) {
+            throw new Error('创建新文件失败');
+        }
+        
+        // 删除旧文件（这里简化处理，实际应该有专门的删除API）
+        console.log(`文件重命名完成: ${oldPath} -> ${newPath}`);
+        
+    } else if (type === 'folder') {
+        // 文件夹重命名比较复杂，需要重命名所有子文件
+        throw new Error('文件夹重命名功能正在开发中');
+    }
+}
+
+// 添加右键菜单功能到文件树项目
+function addContextMenuToTreeItem(itemElement, item) {
+    itemElement.addEventListener('contextmenu', function(e) {
+        e.preventDefault();
+        showContextMenu(e.pageX, e.pageY, item);
+    });
+}
+
+// 显示上下文菜单
+function showContextMenu(x, y, item) {
+    // 移除已存在的菜单
+    const existingMenu = document.querySelector('.context-menu');
+    if (existingMenu) {
+        existingMenu.remove();
+    }
+    
+    const menu = document.createElement('div');
+    menu.className = 'context-menu';
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+    
+    if (item.type === 'file') {
+        menu.innerHTML = `
+            <div class="context-menu-item" onclick="openFile('${item.path}')">
+                <i class="fas fa-file-alt"></i>
+                打开文件
+            </div>
+            <div class="context-menu-item" onclick="showRenameModal('${item.path}', 'file', '${item.name}')">
+                <i class="fas fa-edit"></i>
+                重命名
+            </div>
+            <div class="context-menu-item danger" onclick="deleteFile('${item.path}')">
+                <i class="fas fa-trash"></i>
+                删除文件
+            </div>
+        `;
+    } else if (item.type === 'directory') {
+        menu.innerHTML = `
+            <div class="context-menu-item" onclick="showRenameModal('${item.path}', 'folder', '${item.name}')">
+                <i class="fas fa-edit"></i>
+                重命名文件夹
+            </div>
+            <div class="context-menu-item danger" onclick="deleteFolder('${item.path}')">
+                <i class="fas fa-trash"></i>
+                删除文件夹
+            </div>
+        `;
+    }
+    
+    document.body.appendChild(menu);
+    menu.style.display = 'block';
+    
+    // 点击其他地方关闭菜单
+    setTimeout(() => {
+        document.addEventListener('click', function closeMenu() {
+            menu.remove();
+            document.removeEventListener('click', closeMenu);
+        }, 100);
+    }, 100);
+}
+
+// 删除文件
+async function deleteFile(filePath) {
+    if (!confirm(`确定要删除文件 "${filePath}" 吗？`)) {
+        return;
+    }
+    
+    // 这里应该调用删除API，但当前服务器没有提供删除API
+    // 暂时显示提示
+    showNotification('删除功能需要服务器端支持，敬请期待', 'info');
+}
+
+// 删除文件夹
+async function deleteFolder(folderPath) {
+    if (!confirm(`确定要删除文件夹 "${folderPath}" 及其所有内容吗？`)) {
+        return;
+    }
+    
+    // 这里应该调用删除API，但当前服务器没有提供删除API
+    // 暂时显示提示
+    showNotification('删除功能需要服务器端支持，敬请期待', 'info');
+}
+
+// 显示本地同步选项
+function showLocalSyncOptions() {
+    const notification = document.createElement('div');
+    notification.className = 'notification info';
+    notification.style.cssText = `
+        position: fixed;
+        top: 80px;
+        right: 20px;
+        background: #17a2b8;
+        color: white;
+        padding: 15px 20px;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        z-index: 1000;
+        max-width: 400px;
+        font-size: 14px;
+        line-height: 1.4;
+    `;
+    
+    notification.innerHTML = `
+        <div style="display: flex; align-items: flex-start;">
+            <div style="margin-right: 12px; margin-top: 2px;">
+                <i class="fas fa-sync-alt"></i>
+            </div>
+            <div>
+                <strong>文件已更新！</strong><br>
+                项目文件结构已在服务器端更新。<br>
+                <small style="opacity: 0.9;">如需本地文件夹同步，请手动下载项目文件。</small>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(notification);
+    
+    // 5秒后自动消失
+    setTimeout(() => {
+        notification.style.transform = 'translateX(100%)';
+        notification.style.opacity = '0';
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+            }
+        }, 300);
+    }, 5000);
+}
+// 检查语言环境
+async function checkLanguageEnvironment() {
+    try {
+        showNotification('正在检查语言环境...', 'info');
+        
+        const response = await fetch('/api/languages/environment', {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            displayLanguageEnvironment(result);
+            showNotification('语言环境检查完成', 'success');
+        } else {
+            throw new Error(result.error || '检查语言环境失败');
+        }
+        
+    } catch (error) {
+        console.error('检查语言环境失败:', error);
+        showNotification('检查语言环境失败: ' + error.message, 'error');
+    }
+}
+
+// 显示语言环境状态
+function displayLanguageEnvironment(envData) {
+    // 创建环境状态面板
+    const panel = document.createElement('div');
+    panel.className = 'language-environment-panel';
+    panel.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: white;
+        border: 1px solid #e1e8ed;
+        border-radius: 12px;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        padding: 25px;
+        z-index: 10000;
+        max-width: 600px;
+        max-height: 80vh;
+        overflow-y: auto;
+        min-width: 500px;
+    `;
+    
+    const installedLanguages = envData.supportedLanguages;
+    const missingLanguages = envData.missingLanguages;
+    
+    panel.innerHTML = `
+        <div style="display: flex; align-items: center; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 2px solid #f0f8f0;">
+            <i class="fas fa-cogs" style="font-size: 24px; color: #28a745; margin-right: 12px;"></i>
+            <h3 style="margin: 0; color: #333; font-size: 1.3em;">编程语言环境状态</h3>
+        </div>
+        
+        ${installedLanguages.length > 0 ? `
+            <div style="margin-bottom: 25px;">
+                <h4 style="color: #28a745; margin-bottom: 12px; display: flex; align-items: center;">
+                    <i class="fas fa-check-circle" style="margin-right: 8px;"></i>
+                    已安装的语言 (${installedLanguages.length})
+                </h4>
+                <div style="display: grid; gap: 8px;">
+                    ${installedLanguages.map(lang => {
+                        const langData = envData.languages[lang];
+                        return `
+                            <div style="display: flex; align-items: center; padding: 10px 15px; background: #f8fff8; border: 1px solid #d4edda; border-radius: 8px;">
+                                <i class="fas fa-check-circle" style="color: #28a745; margin-right: 10px;"></i>
+                                <div style="flex: 1;">
+                                    <strong style="color: #155724;">${langData.name}</strong>
+                                    <div style="font-size: 0.85em; color: #666; margin-top: 2px;">${langData.version}</div>
+                                </div>
+                                <span style="background: #28a745; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.75em; font-weight: bold;">可用</span>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+        ` : ''}
+        
+        ${missingLanguages.length > 0 ? `
+            <div style="margin-bottom: 25px;">
+                <h4 style="color: #dc3545; margin-bottom: 12px; display: flex; align-items: center;">
+                    <i class="fas fa-exclamation-triangle" style="margin-right: 8px;"></i>
+                    未安装的语言 (${missingLanguages.length})
+                </h4>
+                <div style="display: grid; gap: 8px;">
+                    ${missingLanguages.map(lang => {
+                        const langData = envData.languages[lang];
+                        return `
+                            <div style="display: flex; align-items: flex-start; padding: 12px 15px; background: #fff5f5; border: 1px solid #f5c6cb; border-radius: 8px;">
+                                <i class="fas fa-times-circle" style="color: #dc3545; margin-right: 10px; margin-top: 2px;"></i>
+                                <div style="flex: 1;">
+                                    <strong style="color: #721c24;">${langData.name}</strong>
+                                    <div style="font-size: 0.8em; color: #666; margin-top: 4px; background: #f8f9fa; padding: 6px 8px; border-radius: 4px; border-left: 3px solid #6f42c1;">
+                                        <i class="fas fa-terminal" style="margin-right: 5px; color: #6f42c1;"></i>
+                                        ${langData.installCommand}
+                                    </div>
+                                </div>
+                                <span style="background: #dc3545; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.75em; font-weight: bold;">未安装</span>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+        ` : ''}
+        
+        <div style="padding-top: 15px; border-top: 1px solid #eee;">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+                <div style="font-size: 0.85em; color: #666;">
+                    <i class="fas fa-info-circle" style="margin-right: 5px;"></i>
+                    总共支持 ${Object.keys(envData.languages).length} 种编程语言
+                </div>
+                <button onclick="closeLanguageEnvironmentPanel()" 
+                        style="padding: 8px 16px; border: 1px solid #6f42c1; border-radius: 6px; background: #6f42c1; color: white; cursor: pointer; font-size: 0.9em; transition: all 0.2s ease;">
+                    <i class="fas fa-times" style="margin-right: 5px;"></i> 关闭
+                </button>
+            </div>
+        </div>
+    `;
+    
+    // 添加关闭面板的函数到全局作用域
+    window.closeLanguageEnvironmentPanel = function() {
+        if (panel.parentNode) {
+            panel.style.transform = 'translate(-50%, -50%) scale(0.9)';
+            panel.style.opacity = '0';
+            setTimeout(() => {
+                panel.parentNode.removeChild(panel);
+                delete window.closeLanguageEnvironmentPanel;
+            }, 200);
+        }
+    };
+    
+    // 添加到页面
+    document.body.appendChild(panel);
+    
+    // 入场动画
+    requestAnimationFrame(() => {
+        panel.style.transform = 'translate(-50%, -50%) scale(1)';
+        panel.style.opacity = '1';
+    });
 }

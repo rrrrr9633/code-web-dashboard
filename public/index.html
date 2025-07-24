@@ -363,6 +363,21 @@
             box-shadow: 0 3px 8px rgba(102, 126, 234, 0.3);
         }
 
+        .add-project-btn.create-empty {
+            background: linear-gradient(45deg, #2ecc71, #27ae60);
+            box-shadow: 0 3px 8px rgba(46, 204, 113, 0.3);
+        }
+
+        .add-project-btn.create-empty:hover {
+            box-shadow: 0 5px 12px rgba(46, 204, 113, 0.4);
+        }
+
+        .project-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
         .add-project-btn:hover {
             transform: translateY(-2px);
             box-shadow: 0 5px 12px rgba(102, 126, 234, 0.4);
@@ -1187,6 +1202,103 @@
             display: block;
         }
 
+        /* 文件操作区域样式 */
+        .file-operations {
+            padding: 15px;
+            background: rgba(248, 249, 250, 0.9);
+            border-top: 1px solid #e9ecef;
+            border-radius: 0 0 12px 12px;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+
+        .file-operation-btn {
+            background: linear-gradient(45deg, #28a745, #20c997);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 0.85em;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .file-operation-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4);
+        }
+
+        .file-operation-btn i {
+            font-size: 0.9em;
+        }
+
+        /* 重命名相关样式 */
+        .tree-label-editable {
+            position: relative;
+        }
+
+        .tree-label-editable input {
+            background: white;
+            border: 2px solid #667eea;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: inherit;
+            font-family: inherit;
+            color: inherit;
+            width: 100%;
+            outline: none;
+        }
+
+        .tree-label-editable input:focus {
+            box-shadow: 0 0 8px rgba(102, 126, 234, 0.3);
+        }
+
+        /* 上下文菜单样式 */
+        .context-menu {
+            position: absolute;
+            background: white;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+            padding: 8px 0;
+            min-width: 150px;
+            z-index: 1000;
+            display: none;
+        }
+
+        .context-menu-item {
+            padding: 10px 16px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: background 0.2s ease;
+            font-size: 0.9em;
+        }
+
+        .context-menu-item:hover {
+            background: #f8f9fa;
+        }
+
+        .context-menu-item i {
+            width: 16px;
+            text-align: center;
+            color: #6c757d;
+        }
+
+        .context-menu-item.danger {
+            color: #dc3545;
+        }
+
+        .context-menu-item.danger:hover {
+            background: #fff5f5;
+        }
+
         .main-content {
             flex: 1;
             min-width: 0; /* 允许内容收缩以适应侧边栏宽度变化 */
@@ -1612,6 +1724,14 @@
 
         .toolbar-btn.secondary:hover {
             background: #138496;
+        }
+
+        .toolbar-btn.info {
+            background: #6f42c1;
+        }
+
+        .toolbar-btn.info:hover {
+            background: #5a32a3;
         }
 
         /* 代码执行结果面板 */
@@ -2366,9 +2486,14 @@
             <div class="project-manager">
                 <div class="project-header">
                     <h3><i class="fas fa-folder-open"></i> 项目管理</h3>
-                    <button class="add-project-btn" onclick="showUnifiedProjectDialog()">
-                        <i class="fas fa-plus"></i> 添加本地文件项目
-                    </button>
+                    <div class="project-actions">
+                        <button class="add-project-btn create-empty" onclick="createEmptyProject()">
+                            <i class="fas fa-file-medical"></i> 创建空项目
+                        </button>
+                        <button class="add-project-btn" onclick="showUnifiedProjectDialog()">
+                            <i class="fas fa-plus"></i> 添加本地文件项目
+                        </button>
+                    </div>
                 </div>
                 <div class="project-list" id="projectList">
                     <!-- 项目列表将在这里动态生成 -->
@@ -2390,6 +2515,16 @@
                 
                 <div class="tree-container" id="fileTree">
                     <!-- 文件树将在这里动态生成 -->
+                </div>
+                
+                <!-- 文件操作区域 -->
+                <div class="file-operations" id="fileOperations" style="display: none;">
+                    <button class="file-operation-btn" onclick="addNewFile()">
+                        <i class="fas fa-file-plus"></i> 添加新文件
+                    </button>
+                    <button class="file-operation-btn" onclick="addNewFolder()">
+                        <i class="fas fa-folder-plus"></i> 添加新文件夹
+                    </button>
                 </div>
                 
                 <!-- 文件树调整大小手柄 -->
@@ -2456,6 +2591,104 @@
             <div class="resize-handle"></div></div>
                 </div>
             
+        </div>
+    </div>
+
+    <!-- 创建空项目模态框 -->
+    <div id="createEmptyProjectModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-file-medical"></i> 创建空项目</h3>
+                <button class="close-modal" onclick="closeCreateEmptyProjectModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="createEmptyProjectForm">
+                <div class="form-group">
+                    <label for="emptyProjectName">项目名称:</label>
+                    <input type="text" id="emptyProjectName" name="projectName" placeholder="输入项目名称" required>
+                </div>
+                <div class="form-group">
+                    <label for="emptyProjectDescription">项目描述 (可选):</label>
+                    <textarea id="emptyProjectDescription" name="projectDescription" placeholder="简单描述这个项目" rows="3"></textarea>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeCreateEmptyProjectModal()">取消</button>
+                    <button type="submit" class="btn btn-primary">创建项目</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 添加新文件模态框 -->
+    <div id="addFileModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-file-plus"></i> 添加新文件</h3>
+                <button class="close-modal" onclick="closeAddFileModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="addFileForm">
+                <div class="form-group">
+                    <label for="newFileName">文件名:</label>
+                    <input type="text" id="newFileName" name="fileName" placeholder="例如: index.html" required>
+                    <small class="form-help">包含文件扩展名，如 .js, .html, .css, .py 等</small>
+                </div>
+                <div class="form-group">
+                    <label for="newFileContent">初始内容 (可选):</label>
+                    <textarea id="newFileContent" name="fileContent" placeholder="文件的初始内容..." rows="10"></textarea>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeAddFileModal()">取消</button>
+                    <button type="submit" class="btn btn-primary">创建文件</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 添加新文件夹模态框 -->
+    <div id="addFolderModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-folder-plus"></i> 添加新文件夹</h3>
+                <button class="close-modal" onclick="closeAddFolderModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="addFolderForm">
+                <div class="form-group">
+                    <label for="newFolderName">文件夹名称:</label>
+                    <input type="text" id="newFolderName" name="folderName" placeholder="例如: components" required>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeAddFolderModal()">取消</button>
+                    <button type="submit" class="btn btn-primary">创建文件夹</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 重命名模态框 -->
+    <div id="renameModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-edit"></i> 重命名</h3>
+                <button class="close-modal" onclick="closeRenameModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="renameForm">
+                <div class="form-group">
+                    <label for="renameInput">新名称:</label>
+                    <input type="text" id="renameInput" name="newName" required>
+                    <small class="form-help" id="renameHelp"></small>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeRenameModal()">取消</button>
+                    <button type="submit" class="btn btn-primary">确认重命名</button>
+                </div>
+            </form>
         </div>
     </div>
 

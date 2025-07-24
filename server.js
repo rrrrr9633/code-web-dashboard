@@ -605,7 +605,7 @@ app.get('/api/projects', requireAuth, (req, res) => {
 // 添加新项目 - 存储到数据库（多用户支持）
 app.post('/api/projects', requireAuth, (req, res) => {
     try {
-        const { name, path: projectPath } = req.body;
+        const { name, path: projectPath, description, isEmpty } = req.body;
         
         if (!name || !projectPath) {
             return res.status(400).json({ error: '项目名称和路径不能为空' });
@@ -628,7 +628,8 @@ app.post('/api/projects', requireAuth, (req, res) => {
                 user_id: req.user.id, // 关联到当前用户
                 name,
                 path: projectPath,
-                description: `${name} 项目`,
+                description: description || `${name} 项目`,
+                is_empty: isEmpty || false,
                 created_at: new Date().toISOString()
             };
             
@@ -642,8 +643,43 @@ app.post('/api/projects', requireAuth, (req, res) => {
                         return res.status(500).json({ error: '添加项目失败' });
                     }
                     
+                    // 如果是空项目，创建一个默认的项目结构
+                    if (isEmpty) {
+                        const defaultStructure = [
+                            {
+                                name: 'README.md',
+                                type: 'file',
+                                path: 'README.md',
+                                extension: '.md'
+                            }
+                        ];
+                        
+                        // 保存默认结构
+                        db.run(
+                            "INSERT OR REPLACE INTO project_structures (project_id, structure_data, updated_at) VALUES (?, ?, ?)",
+                            [newProject.id, JSON.stringify(defaultStructure), new Date().toISOString()],
+                            (structureErr) => {
+                                if (structureErr) {
+                                    console.error('保存默认结构失败:', structureErr);
+                                }
+                            }
+                        );
+                        
+                        // 创建默认的README文件
+                        const readmeContent = `# ${name}\n\n${description || '这是一个新项目'}\n\n## 开始使用\n\n欢迎开始你的项目开发！\n`;
+                        db.run(
+                            "INSERT INTO project_files (project_id, file_path, content, size, last_modified, extension) VALUES (?, ?, ?, ?, ?, ?)",
+                            [newProject.id, 'README.md', readmeContent, Buffer.byteLength(readmeContent, 'utf8'), Date.now(), '.md'],
+                            (fileErr) => {
+                                if (fileErr) {
+                                    console.error('创建默认README文件失败:', fileErr);
+                                }
+                            }
+                        );
+                    }
+                    
                     res.json(newProject);
-                    console.log(`用户 ${req.user.username} 添加了项目 "${name}":`, projectPath);
+                    console.log(`用户 ${req.user.username} ${isEmpty ? '创建了空项目' : '添加了项目'} "${name}":`, projectPath);
                 }
             );
         });
@@ -951,24 +987,33 @@ app.put('/api/projects/:id/files/*', requireAuth, (req, res) => {
     try {
         const projectId = req.params.id;
         const filePath = req.params[0];
-        const { content } = req.body;
+        const { content, projectId: requestProjectId, isPlaceholder } = req.body;
         
-        if (!content && content !== '') {
+        if (content === undefined || content === null) {
             return res.status(400).json({ error: '文件内容不能为空' });
         }
         
-        console.log(`保存文件请求: 项目=${projectId}, 路径=${filePath}`);
+        // 双重验证项目ID
+        if (requestProjectId && requestProjectId !== projectId) {
+            console.error(`项目ID不匹配: URL中为 ${projectId}, 请求体中为 ${requestProjectId}`);
+            return res.status(400).json({ error: '项目ID不匹配' });
+        }
+        
+        console.log(`📁 保存文件请求: 项目=${projectId}, 路径=${filePath}, 用户=${req.user.username}`);
         
         // 验证项目是否属于当前用户
-        db.get("SELECT id FROM projects WHERE id = ? AND user_id = ?", [projectId, req.user.id], (err, project) => {
+        db.get("SELECT id, name FROM projects WHERE id = ? AND user_id = ?", [projectId, req.user.id], (err, project) => {
             if (err) {
                 console.error('验证项目失败:', err);
                 return res.status(500).json({ error: '验证项目失败' });
             }
             
             if (!project) {
+                console.error(`项目不存在或无权限访问: projectId=${projectId}, userId=${req.user.id}`);
                 return res.status(404).json({ error: '项目不存在或无权限访问' });
             }
+            
+            console.log(`✅ 项目验证成功: "${project.name}"`);
             
             // 首先尝试直接匹配路径
             db.get(
@@ -982,26 +1027,12 @@ app.put('/api/projects/:id/files/*', requireAuth, (req, res) => {
                     
                     if (row) {
                         // 文件存在，更新内容
+                        console.log(`📝 更新现有文件: ${filePath}`);
                         updateFileContent(projectId, filePath, content, res);
                     } else {
-                        // 如果直接匹配没找到，尝试模糊匹配
-                        db.get(
-                            "SELECT file_path FROM project_files WHERE project_id = ? AND file_path LIKE ?",
-                            [projectId, `%/${filePath}`],
-                            (err, row) => {
-                                if (err) {
-                                    console.error('模糊匹配文件失败:', err);
-                                    return res.status(500).json({ error: '查询文件失败' });
-                                }
-                                
-                                if (row) {
-                                    // 使用找到的完整路径更新
-                                    updateFileContent(projectId, row.file_path, content, res);
-                                } else {
-                                    return res.status(404).json({ error: '文件不存在' });
-                                }
-                            }
-                        );
+                        // 文件不存在，创建新文件
+                        console.log(`🆕 创建新文件: ${filePath}`);
+                        createNewFile(projectId, filePath, content, res, isPlaceholder);
                     }
                 }
             );
@@ -1032,7 +1063,7 @@ function updateFileContent(projectId, filePath, content, res) {
                 return res.status(404).json({ error: '文件不存在' });
             }
             
-            console.log(`文件已更新: ${filePath}`);
+            console.log(`✅ 文件已更新: ${filePath} (${newSize} bytes)`);
             res.json({ 
                 success: true, 
                 message: '文件保存成功',
@@ -1040,6 +1071,74 @@ function updateFileContent(projectId, filePath, content, res) {
                 size: newSize,
                 lastModified: lastModified
             });
+        }
+    );
+}
+
+// 辅助函数：创建新文件
+function createNewFile(projectId, filePath, content, res, isPlaceholder = false) {
+    const newSize = Buffer.byteLength(content, 'utf8');
+    const lastModified = Date.now();
+    const extension = path.extname(filePath).toLowerCase();
+    
+    console.log(`📄 创建新文件: 项目=${projectId}, 路径=${filePath}, 大小=${newSize}bytes, 扩展名=${extension}`);
+    
+    db.run(
+        `INSERT INTO project_files (project_id, file_path, content, size, last_modified, extension) 
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [projectId, filePath, content, newSize, lastModified, extension],
+        function(err) {
+            if (err) {
+                console.error('创建文件失败:', err);
+                return res.status(500).json({ error: '创建文件失败: ' + err.message });
+            }
+            
+            console.log(`✅ 文件创建成功: ${filePath} (ID: ${this.lastID})`);
+            
+            // 更新项目结构缓存
+            updateProjectStructureCache(projectId);
+            
+            res.json({ 
+                success: true, 
+                message: isPlaceholder ? '文件夹创建成功' : '文件创建成功',
+                path: filePath,
+                size: newSize,
+                lastModified: lastModified,
+                fileId: this.lastID,
+                isPlaceholder: isPlaceholder
+            });
+        }
+    );
+}
+
+// 辅助函数：更新项目结构缓存
+function updateProjectStructureCache(projectId) {
+    // 获取项目所有文件，重新生成结构
+    db.all(
+        "SELECT file_path FROM project_files WHERE project_id = ?",
+        [projectId],
+        (err, files) => {
+            if (err) {
+                console.error('获取项目文件列表失败:', err);
+                return;
+            }
+            
+            // 从文件路径生成结构
+            const filePaths = files.map(f => f.file_path);
+            const structure = generateStructureFromFilePaths(filePaths);
+            
+            // 更新结构缓存
+            db.run(
+                "INSERT OR REPLACE INTO project_structures (project_id, structure_data, updated_at) VALUES (?, ?, ?)",
+                [projectId, JSON.stringify(structure), new Date().toISOString()],
+                (err) => {
+                    if (err) {
+                        console.error('更新项目结构缓存失败:', err);
+                    } else {
+                        console.log(`📂 项目结构缓存已更新: ${projectId}`);
+                    }
+                }
+            );
         }
     );
 }
@@ -2157,6 +2256,60 @@ app.get('/api/projects/:projectId/structure', (req, res) => {
 
 // 搜索文件和内容
 
+// 语言环境检测API
+app.get('/api/languages/environment', requireAuth, (req, res) => {
+    const languageChecks = [
+        { name: 'Node.js', command: 'node -v', key: 'javascript', required: false },
+        { name: 'Python', command: 'python3 --version', key: 'python', required: false },
+        { name: 'GCC', command: 'gcc --version', key: 'c', required: false },
+        { name: 'G++', command: 'g++ --version', key: 'cpp', required: false },
+        { name: 'Java', command: 'java -version', key: 'java', required: false },
+        { name: 'Go', command: 'go version', key: 'go', required: false },
+        { name: '.NET', command: 'dotnet --version', key: 'csharp', required: false },
+        { name: 'Rust', command: 'rustc --version', key: 'rust', required: false }
+    ];
+    
+    const results = {};
+    let completed = 0;
+    
+    languageChecks.forEach(({ name, command, key, required }) => {
+        exec(command, (error, stdout, stderr) => {
+            results[key] = {
+                name: name,
+                installed: !error,
+                version: error ? null : (stdout || stderr).split('\n')[0].trim(),
+                installCommand: getInstallCommand(key),
+                required: required
+            };
+            
+            completed++;
+            if (completed === languageChecks.length) {
+                res.json({
+                    success: true,
+                    languages: results,
+                    supportedLanguages: Object.keys(results).filter(k => results[k].installed),
+                    missingLanguages: Object.keys(results).filter(k => !results[k].installed)
+                });
+            }
+        });
+    });
+});
+
+// 获取安装命令的辅助函数
+function getInstallCommand(language) {
+    const installCommands = {
+        'javascript': 'Node.js通常预装，或访问 https://nodejs.org/',
+        'python': 'sudo apt install python3',
+        'c': 'sudo apt install gcc',
+        'cpp': 'sudo apt install g++',
+        'java': 'sudo apt install default-jdk',
+        'go': '访问 https://golang.org/doc/install',
+        'csharp': 'sudo snap install dotnet-sdk',
+        'rust': 'curl --proto \'=https\' --tlsv1.2 -sSf https://sh.rustup.rs | sh'
+    };
+    return installCommands[language] || '请查看官方文档';
+}
+
 // 代码检查和运行功能
 const { spawn, exec } = require('child_process');
 const { VM } = require('vm2');
@@ -2177,6 +2330,7 @@ function detectLanguage(filename, content) {
         '.c': 'c',
         '.go': 'go',
         '.rs': 'rust',
+        '.cs': 'csharp',
         '.php': 'php',
         '.rb': 'ruby',
         '.sh': 'bash',
@@ -2213,6 +2367,24 @@ app.post('/api/code/check', requireAuth, (req, res) => {
                 break;
             case 'python':
                 result = checkPython(code, filename);
+                break;
+            case 'c':
+                result = checkC(code, filename);
+                break;
+            case 'cpp':
+                result = checkCpp(code, filename);
+                break;
+            case 'java':
+                result = checkJava(code, filename);
+                break;
+            case 'go':
+                result = checkGo(code, filename);
+                break;
+            case 'csharp':
+                result = checkCSharp(code, filename);
+                break;
+            case 'rust':
+                result = checkRust(code, filename);
                 break;
             case 'json':
                 result = checkJSON(code);
@@ -2251,6 +2423,24 @@ app.post('/api/code/run', requireAuth, (req, res) => {
                 break;
             case 'python':
                 runPython(code, input, res);
+                break;
+            case 'c':
+                runC(code, input, res);
+                break;
+            case 'cpp':
+                runCpp(code, input, res);
+                break;
+            case 'java':
+                runJava(code, input, res);
+                break;
+            case 'go':
+                runGo(code, input, res);
+                break;
+            case 'csharp':
+                runCSharp(code, input, res);
+                break;
+            case 'rust':
+                runRust(code, input, res);
                 break;
             case 'html':
                 runHTML(code, res);
@@ -2618,6 +2808,1294 @@ function runHTML(code, res) {
             executionTime: executionTime
         });
     }
+}
+
+// C语言语法检查
+function checkC(code, filename) {
+    const result = {
+        language: 'c',
+        errors: [],
+        warnings: []
+    };
+    
+    try {
+        const lines = code.split('\n');
+        let hasMain = false;
+        let hasInclude = false;
+        let braceCount = 0;
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            const lineNum = i + 1;
+            
+            // 检查是否有main函数
+            if (line.includes('int main(') || line.includes('int main (')) {
+                hasMain = true;
+            }
+            
+            // 检查是否有include语句
+            if (line.startsWith('#include')) {
+                hasInclude = true;
+            }
+            
+            // 检查括号匹配
+            for (const char of line) {
+                if (char === '{') braceCount++;
+                if (char === '}') braceCount--;
+            }
+            
+            // 检查常见语法错误
+            if (line.includes('printf(') && !line.includes('"')) {
+                result.warnings.push({
+                    line: lineNum,
+                    column: line.indexOf('printf(') + 1,
+                    message: 'printf函数通常需要格式字符串',
+                    severity: 'warning'
+                });
+            }
+            
+            // 检查分号
+            if (line.length > 0 && !line.startsWith('#') && !line.startsWith('//') && 
+                !line.startsWith('/*') && !line.endsWith(';') && !line.endsWith('{') && 
+                !line.endsWith('}') && line.includes('=')) {
+                result.warnings.push({
+                    line: lineNum,
+                    column: line.length,
+                    message: '语句可能缺少分号',
+                    severity: 'warning'
+                });
+            }
+        }
+        
+        // 检查基本结构
+        if (!hasMain) {
+            result.warnings.push({
+                line: 1,
+                column: 1,
+                message: '建议包含main函数作为程序入口',
+                severity: 'warning'
+            });
+        }
+        
+        if (!hasInclude) {
+            result.warnings.push({
+                line: 1,
+                column: 1,
+                message: '建议包含必要的头文件（如stdio.h）',
+                severity: 'warning'
+            });
+        }
+        
+        if (braceCount !== 0) {
+            result.errors.push({
+                line: lines.length,
+                column: 1,
+                message: '括号不匹配',
+                severity: 'error'
+            });
+        }
+        
+        if (result.errors.length === 0) {
+            result.warnings.push({
+                line: 1,
+                column: 1,
+                message: 'C语言基础语法检查通过',
+                severity: 'info'
+            });
+        }
+        
+    } catch (error) {
+        result.errors.push({
+            line: 1,
+            column: 1,
+            message: '语法检查出错: ' + error.message,
+            severity: 'error'
+        });
+    }
+    
+    return result;
+}
+
+// C++语言语法检查
+function checkCpp(code, filename) {
+    const result = {
+        language: 'cpp',
+        errors: [],
+        warnings: []
+    };
+    
+    try {
+        const lines = code.split('\n');
+        let hasMain = false;
+        let hasInclude = false;
+        let hasNamespace = false;
+        let braceCount = 0;
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            const lineNum = i + 1;
+            
+            // 检查是否有main函数
+            if (line.includes('int main(') || line.includes('int main (')) {
+                hasMain = true;
+            }
+            
+            // 检查是否有include语句
+            if (line.startsWith('#include')) {
+                hasInclude = true;
+            }
+            
+            // 检查是否使用了命名空间
+            if (line.includes('using namespace std')) {
+                hasNamespace = true;
+            }
+            
+            // 检查括号匹配
+            for (const char of line) {
+                if (char === '{') braceCount++;
+                if (char === '}') braceCount--;
+            }
+            
+            // 检查常见语法错误
+            if (line.includes('cout') && !line.includes('<<')) {
+                result.warnings.push({
+                    line: lineNum,
+                    column: line.indexOf('cout') + 1,
+                    message: 'cout通常需要使用<<操作符',
+                    severity: 'warning'
+                });
+            }
+            
+            if (line.includes('cin') && !line.includes('>>')) {
+                result.warnings.push({
+                    line: lineNum,
+                    column: line.indexOf('cin') + 1,
+                    message: 'cin通常需要使用>>操作符',
+                    severity: 'warning'
+                });
+            }
+            
+            // 检查分号
+            if (line.length > 0 && !line.startsWith('#') && !line.startsWith('//') && 
+                !line.startsWith('/*') && !line.endsWith(';') && !line.endsWith('{') && 
+                !line.endsWith('}') && (line.includes('=') || line.includes('cout') || line.includes('cin'))) {
+                result.warnings.push({
+                    line: lineNum,
+                    column: line.length,
+                    message: '语句可能缺少分号',
+                    severity: 'warning'
+                });
+            }
+        }
+        
+        // 检查基本结构
+        if (!hasMain) {
+            result.warnings.push({
+                line: 1,
+                column: 1,
+                message: '建议包含main函数作为程序入口',
+                severity: 'warning'
+            });
+        }
+        
+        if (!hasInclude) {
+            result.warnings.push({
+                line: 1,
+                column: 1,
+                message: '建议包含必要的头文件（如iostream）',
+                severity: 'warning'
+            });
+        }
+        
+        if (hasInclude && line.includes('iostream') && !hasNamespace) {
+            result.warnings.push({
+                line: 1,
+                column: 1,
+                message: '建议使用"using namespace std;"简化代码',
+                severity: 'warning'
+            });
+        }
+        
+        if (braceCount !== 0) {
+            result.errors.push({
+                line: lines.length,
+                column: 1,
+                message: '括号不匹配',
+                severity: 'error'
+            });
+        }
+        
+        if (result.errors.length === 0) {
+            result.warnings.push({
+                line: 1,
+                column: 1,
+                message: 'C++语言基础语法检查通过',
+                severity: 'info'
+            });
+        }
+        
+    } catch (error) {
+        result.errors.push({
+            line: 1,
+            column: 1,
+            message: '语法检查出错: ' + error.message,
+            severity: 'error'
+        });
+    }
+    
+    return result;
+}
+
+// C语言代码运行
+function runC(code, input, res) {
+    const startTime = Date.now();
+    
+    // 创建临时文件
+    const tempFileName = 'temp_c_' + Date.now();
+    const sourceFile = path.join(__dirname, tempFileName + '.c');
+    const executableFile = path.join(__dirname, tempFileName);
+    
+    fs.writeFileSync(sourceFile, code);
+    
+    // 编译C代码
+    const compileProcess = spawn('gcc', ['-o', executableFile, sourceFile], {
+        timeout: 10000 // 10秒编译超时
+    });
+    
+    let compileOutput = '';
+    let compileError = '';
+    
+    compileProcess.stdout.on('data', (data) => {
+        compileOutput += data.toString();
+    });
+    
+    compileProcess.stderr.on('data', (data) => {
+        compileError += data.toString();
+    });
+    
+    compileProcess.on('close', (code) => {
+        if (code !== 0) {
+            // 编译失败
+            const executionTime = Date.now() - startTime;
+            
+            // 清理临时文件
+            cleanupTempFiles([sourceFile, executableFile]);
+            
+            res.json({
+                output: compileOutput,
+                error: `编译失败:\n${compileError}`,
+                executionTime: executionTime
+            });
+            return;
+        }
+        
+        // 编译成功，运行程序
+        const runProcess = spawn(executableFile, [], {
+            timeout: 10000 // 10秒运行超时
+        });
+        
+        let output = '';
+        let errorOutput = '';
+        
+        // 如果有输入，发送给进程
+        if (input) {
+            runProcess.stdin.write(input);
+            runProcess.stdin.end();
+        }
+        
+        runProcess.stdout.on('data', (data) => {
+            output += data.toString();
+        });
+        
+        runProcess.stderr.on('data', (data) => {
+            errorOutput += data.toString();
+        });
+        
+        runProcess.on('close', (exitCode) => {
+            const executionTime = Date.now() - startTime;
+            
+            // 清理临时文件
+            cleanupTempFiles([sourceFile, executableFile]);
+            
+            res.json({
+                output: output || '程序执行完成，无输出',
+                error: errorOutput || (exitCode !== 0 ? `程序退出码: ${exitCode}` : null),
+                executionTime: executionTime
+            });
+        });
+        
+        runProcess.on('error', (error) => {
+            const executionTime = Date.now() - startTime;
+            
+            // 清理临时文件
+            cleanupTempFiles([sourceFile, executableFile]);
+            
+            res.json({
+                output: '',
+                error: 'C程序执行失败: ' + error.message,
+                executionTime: executionTime
+            });
+        });
+    });
+    
+    compileProcess.on('error', (error) => {
+        const executionTime = Date.now() - startTime;
+        
+        // 清理临时文件
+        cleanupTempFiles([sourceFile, executableFile]);
+        
+        if (error.code === 'ENOENT') {
+            res.json({
+                output: '',
+                error: '未安装GCC编译器。请安装GCC以支持C语言编译运行。',
+                executionTime: executionTime
+            });
+        } else {
+            res.json({
+                output: '',
+                error: 'C代码编译失败: ' + error.message,
+                executionTime: executionTime
+            });
+        }
+    });
+}
+
+// C++语言代码运行
+function runCpp(code, input, res) {
+    const startTime = Date.now();
+    
+    // 创建临时文件
+    const tempFileName = 'temp_cpp_' + Date.now();
+    const sourceFile = path.join(__dirname, tempFileName + '.cpp');
+    const executableFile = path.join(__dirname, tempFileName);
+    
+    fs.writeFileSync(sourceFile, code);
+    
+    // 编译C++代码
+    const compileProcess = spawn('g++', ['-o', executableFile, sourceFile], {
+        timeout: 10000 // 10秒编译超时
+    });
+    
+    let compileOutput = '';
+    let compileError = '';
+    
+    compileProcess.stdout.on('data', (data) => {
+        compileOutput += data.toString();
+    });
+    
+    compileProcess.stderr.on('data', (data) => {
+        compileError += data.toString();
+    });
+    
+    compileProcess.on('close', (code) => {
+        if (code !== 0) {
+            // 编译失败
+            const executionTime = Date.now() - startTime;
+            
+            // 清理临时文件
+            cleanupTempFiles([sourceFile, executableFile]);
+            
+            res.json({
+                output: compileOutput,
+                error: `编译失败:\n${compileError}`,
+                executionTime: executionTime
+            });
+            return;
+        }
+        
+        // 编译成功，运行程序
+        const runProcess = spawn(executableFile, [], {
+            timeout: 10000 // 10秒运行超时
+        });
+        
+        let output = '';
+        let errorOutput = '';
+        
+        // 如果有输入，发送给进程
+        if (input) {
+            runProcess.stdin.write(input);
+            runProcess.stdin.end();
+        }
+        
+        runProcess.stdout.on('data', (data) => {
+            output += data.toString();
+        });
+        
+        runProcess.stderr.on('data', (data) => {
+            errorOutput += data.toString();
+        });
+        
+        runProcess.on('close', (exitCode) => {
+            const executionTime = Date.now() - startTime;
+            
+            // 清理临时文件  
+            cleanupTempFiles([sourceFile, executableFile]);
+            
+            res.json({
+                output: output || '程序执行完成，无输出',
+                error: errorOutput || (exitCode !== 0 ? `程序退出码: ${exitCode}` : null),
+                executionTime: executionTime
+            });
+        });
+        
+        runProcess.on('error', (error) => {
+            const executionTime = Date.now() - startTime;
+            
+            // 清理临时文件
+            cleanupTempFiles([sourceFile, executableFile]);
+            
+            res.json({
+                output: '',
+                error: 'C++程序执行失败: ' + error.message,
+                executionTime: executionTime
+            });
+        });
+    });
+    
+    compileProcess.on('error', (error) => {
+        const executionTime = Date.now() - startTime;
+        
+        // 清理临时文件
+        cleanupTempFiles([sourceFile, executableFile]);
+        
+        if (error.code === 'ENOENT') {
+            res.json({
+                output: '',
+                error: '未安装G++编译器。请安装G++以支持C++语言编译运行。',
+                executionTime: executionTime
+            });
+        } else {
+            res.json({
+                output: '',
+                error: 'C++代码编译失败: ' + error.message,
+                executionTime: executionTime
+            });
+        }
+    });
+}
+
+// 清理临时文件的辅助函数
+function cleanupTempFiles(files) {
+    files.forEach(file => {
+        try {
+            if (fs.existsSync(file)) {
+                fs.unlinkSync(file);
+            }
+        } catch (e) {
+            console.error('清理临时文件失败:', e);
+        }
+    });
+}
+
+// Java语言语法检查
+function checkJava(code, filename) {
+    const result = {
+        language: 'java',
+        errors: [],
+        warnings: []
+    };
+    
+    try {
+        const lines = code.split('\n');
+        let hasMain = false;
+        let hasPackage = false;
+        let hasClass = false;
+        let braceCount = 0;
+        let className = '';
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            const lineNum = i + 1;
+            
+            // 检查包声明
+            if (line.startsWith('package ')) {
+                hasPackage = true;
+            }
+            
+            // 检查类声明
+            if (line.includes('class ')) {
+                hasClass = true;
+                const match = line.match(/class\s+(\w+)/);
+                if (match) {
+                    className = match[1];
+                }
+            }
+            
+            // 检查是否有main方法
+            if (line.includes('public static void main(') || line.includes('public static void main (')) {
+                hasMain = true;
+            }
+            
+            // 检查括号匹配
+            for (const char of line) {
+                if (char === '{') braceCount++;
+                if (char === '}') braceCount--;
+            }
+            
+            // 检查分号
+            if (line.length > 0 && !line.startsWith('//') && !line.startsWith('/*') &&
+                !line.startsWith('package') && !line.startsWith('import') &&
+                !line.endsWith(';') && !line.endsWith('{') && !line.endsWith('}') &&
+                (line.includes('=') || line.includes('System.out'))) {
+                result.warnings.push({
+                    line: lineNum,
+                    column: line.length,
+                    message: '语句可能缺少分号',
+                    severity: 'warning'
+                });
+            }
+        }
+        
+        // 检查基本结构
+        if (!hasClass) {
+            result.warnings.push({
+                line: 1,
+                column: 1,
+                message: '建议包含至少一个类声明',
+                severity: 'warning'
+            });
+        }
+        
+        if (!hasMain) {
+            result.warnings.push({
+                line: 1,
+                column: 1,
+                message: '建议包含main方法作为程序入口',
+                severity: 'warning'
+            });
+        }
+        
+        if (braceCount !== 0) {
+            result.errors.push({
+                line: lines.length,
+                column: 1,
+                message: '括号不匹配',
+                severity: 'error'
+            });
+        }
+        
+        // 检查类名和文件名是否匹配（如果有类名的话）
+        if (className && filename) {
+            const fileBaseName = path.basename(filename, '.java');
+            if (className !== fileBaseName) {
+                result.warnings.push({
+                    line: 1,
+                    column: 1,
+                    message: `类名 "${className}" 与文件名 "${fileBaseName}" 不匹配`,
+                    severity: 'warning'
+                });
+            }
+        }
+        
+        if (result.errors.length === 0) {
+            result.warnings.push({
+                line: 1,
+                column: 1,
+                message: 'Java语言基础语法检查通过',
+                severity: 'info'
+            });
+        }
+        
+    } catch (error) {
+        result.errors.push({
+            line: 1,
+            column: 1,
+            message: '语法检查出错: ' + error.message,
+            severity: 'error'
+        });
+    }
+    
+    return result;
+}
+
+// Go语言语法检查
+function checkGo(code, filename) {
+    const result = {
+        language: 'go',
+        errors: [],
+        warnings: []
+    };
+    
+    try {
+        const lines = code.split('\n');
+        let hasPackage = false;
+        let hasMain = false;
+        let hasImport = false;
+        let braceCount = 0;
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            const lineNum = i + 1;
+            
+            // 检查包声明
+            if (line.startsWith('package ')) {
+                hasPackage = true;
+            }
+            
+            // 检查导入语句
+            if (line.startsWith('import ') || line === 'import (') {
+                hasImport = true;
+            }
+            
+            // 检查是否有main函数
+            if (line.includes('func main()') || line.includes('func main ()')) {
+                hasMain = true;
+            }
+            
+            // 检查括号匹配
+            for (const char of line) {
+                if (char === '{') braceCount++;
+                if (char === '}') braceCount--;
+            }
+            
+            // 检查fmt.Print相关语句
+            if (line.includes('fmt.Print') && !hasImport) {
+                result.warnings.push({
+                    line: lineNum,
+                    column: line.indexOf('fmt.Print') + 1,
+                    message: '使用fmt包需要先导入',
+                    severity: 'warning'
+                });
+            }
+        }
+        
+        // 检查基本结构
+        if (!hasPackage) {
+            result.errors.push({
+                line: 1,
+                column: 1,
+                message: 'Go程序必须包含package声明',
+                severity: 'error'
+            });
+        }
+        
+        if (!hasMain && hasPackage && lines.some(line => line.includes('package main'))) {
+            result.warnings.push({
+                line: 1,
+                column: 1,
+                message: '主包应该包含main函数',
+                severity: 'warning'
+            });
+        }
+        
+        if (braceCount !== 0) {
+            result.errors.push({
+                line: lines.length,
+                column: 1,
+                message: '括号不匹配',
+                severity: 'error'
+            });
+        }
+        
+        if (result.errors.length === 0) {
+            result.warnings.push({
+                line: 1,
+                column: 1,
+                message: 'Go语言基础语法检查通过',
+                severity: 'info'
+            });
+        }
+        
+    } catch (error) {
+        result.errors.push({
+            line: 1,
+            column: 1,
+            message: '语法检查出错: ' + error.message,
+            severity: 'error'
+        });
+    }
+    
+    return result;
+}
+
+// C#语言语法检查
+function checkCSharp(code, filename) {
+    const result = {
+        language: 'csharp',
+        errors: [],
+        warnings: []
+    };
+    
+    try {
+        const lines = code.split('\n');
+        let hasUsing = false;
+        let hasNamespace = false;
+        let hasClass = false;
+        let hasMain = false;
+        let braceCount = 0;
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            const lineNum = i + 1;
+            
+            // 检查using语句
+            if (line.startsWith('using ')) {
+                hasUsing = true;
+            }
+            
+            // 检查命名空间
+            if (line.startsWith('namespace ')) {
+                hasNamespace = true;
+            }
+            
+            // 检查类声明
+            if (line.includes('class ')) {
+                hasClass = true;
+            }
+            
+            // 检查是否有Main方法
+            if (line.includes('static void Main(') || line.includes('static void Main (')) {
+                hasMain = true;
+            }
+            
+            // 检查括号匹配
+            for (const char of line) {
+                if (char === '{') braceCount++;
+                if (char === '}') braceCount--;
+            }
+            
+            // 检查Console相关语句
+            if (line.includes('Console.') && !hasUsing) {
+                result.warnings.push({
+                    line: lineNum,
+                    column: line.indexOf('Console.') + 1,
+                    message: '建议添加"using System;"以简化代码',
+                    severity: 'warning'
+                });
+            }
+            
+            // 检查分号
+            if (line.length > 0 && !line.startsWith('//') && !line.startsWith('/*') &&
+                !line.startsWith('using') && !line.startsWith('namespace') &&
+                !line.endsWith(';') && !line.endsWith('{') && !line.endsWith('}') &&
+                (line.includes('=') || line.includes('Console.'))) {
+                result.warnings.push({
+                    line: lineNum,
+                    column: line.length,
+                    message: '语句可能缺少分号',
+                    severity: 'warning'
+                });
+            }
+        }
+        
+        // 检查基本结构
+        if (!hasClass) {
+            result.warnings.push({
+                line: 1,
+                column: 1,
+                message: '建议包含至少一个类声明',
+                severity: 'warning'
+            });
+        }
+        
+        if (!hasMain) {
+            result.warnings.push({
+                line: 1,
+                column: 1,
+                message: '建议包含Main方法作为程序入口',
+                severity: 'warning'
+            });
+        }
+        
+        if (braceCount !== 0) {
+            result.errors.push({
+                line: lines.length,
+                column: 1,
+                message: '括号不匹配',
+                severity: 'error'
+            });
+        }
+        
+        if (result.errors.length === 0) {
+            result.warnings.push({
+                line: 1,
+                column: 1,
+                message: 'C#语言基础语法检查通过',
+                severity: 'info'
+            });
+        }
+        
+    } catch (error) {
+        result.errors.push({
+            line: 1,
+            column: 1,
+            message: '语法检查出错: ' + error.message,
+            severity: 'error'
+        });
+    }
+    
+    return result;
+}
+
+// Rust语言语法检查
+function checkRust(code, filename) {
+    const result = {
+        language: 'rust',
+        errors: [],
+        warnings: []
+    };
+    
+    try {
+        const lines = code.split('\n');
+        let hasMain = false;
+        let hasUse = false;
+        let braceCount = 0;
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            const lineNum = i + 1;
+            
+            // 检查use语句
+            if (line.startsWith('use ')) {
+                hasUse = true;
+            }
+            
+            // 检查是否有main函数
+            if (line.includes('fn main()') || line.includes('fn main ()')) {
+                hasMain = true;
+            }
+            
+            // 检查括号匹配
+            for (const char of line) {
+                if (char === '{') braceCount++;
+                if (char === '}') braceCount--;
+            }
+            
+            // 检查println!宏
+            if (line.includes('println!(') && !line.endsWith(';')) {
+                result.warnings.push({
+                    line: lineNum,
+                    column: line.length,
+                    message: 'println!宏调用可能缺少分号',
+                    severity: 'warning'
+                });
+            }
+        }
+        
+        // 检查基本结构
+        if (!hasMain) {
+            result.warnings.push({
+                line: 1,
+                column: 1,
+                message: '建议包含main函数作为程序入口',
+                severity: 'warning'
+            });
+        }
+        
+        if (braceCount !== 0) {
+            result.errors.push({
+                line: lines.length,
+                column: 1,
+                message: '括号不匹配',
+                severity: 'error'
+            });
+        }
+        
+        if (result.errors.length === 0) {
+            result.warnings.push({
+                line: 1,
+                column: 1,
+                message: 'Rust语言基础语法检查通过',
+                severity: 'info'
+            });
+        }
+        
+    } catch (error) {
+        result.errors.push({
+            line: 1,
+            column: 1,
+            message: '语法检查出错: ' + error.message,
+            severity: 'error'
+        });
+    }
+    
+    return result;
+}
+
+// Java代码运行
+function runJava(code, input, res) {
+    const startTime = Date.now();
+    
+    // 检查Java是否安装
+    exec('java -version', (error) => {
+        if (error) {
+            const executionTime = Date.now() - startTime;
+            return res.json({
+                output: '',
+                error: '未安装Java环境。请先安装Java JDK。\n安装命令: sudo apt install default-jdk',
+                executionTime: executionTime
+            });
+        }
+        
+        // 提取类名
+        let className = 'Main';
+        const classMatch = code.match(/public\s+class\s+(\w+)/);
+        if (classMatch) {
+            className = classMatch[1];
+        }
+        
+        // 创建临时文件
+        const tempFileName = 'temp_java_' + Date.now();
+        const sourceFile = path.join(__dirname, className + '.java');
+        const classFile = path.join(__dirname, className + '.class');
+        
+        fs.writeFileSync(sourceFile, code);
+        
+        // 编译Java代码
+        const compileProcess = spawn('javac', [sourceFile], {
+            timeout: 15000 // 15秒编译超时
+        });
+        
+        let compileOutput = '';
+        let compileError = '';
+        
+        compileProcess.stdout.on('data', (data) => {
+            compileOutput += data.toString();
+        });
+        
+        compileProcess.stderr.on('data', (data) => {
+            compileError += data.toString();
+        });
+        
+        compileProcess.on('close', (code) => {
+            if (code !== 0) {
+                // 编译失败
+                const executionTime = Date.now() - startTime;
+                
+                // 清理临时文件
+                cleanupTempFiles([sourceFile, classFile]);
+                
+                res.json({
+                    output: compileOutput,
+                    error: `编译失败:\n${compileError}`,
+                    executionTime: executionTime
+                });
+                return;
+            }
+            
+            // 编译成功，运行程序
+            const runProcess = spawn('java', [className], {
+                cwd: __dirname,
+                timeout: 10000 // 10秒运行超时
+            });
+            
+            let output = '';
+            let errorOutput = '';
+            
+            // 如果有输入，发送给进程
+            if (input) {
+                runProcess.stdin.write(input);
+                runProcess.stdin.end();
+            }
+            
+            runProcess.stdout.on('data', (data) => {
+                output += data.toString();
+            });
+            
+            runProcess.stderr.on('data', (data) => {
+                errorOutput += data.toString();
+            });
+            
+            runProcess.on('close', (exitCode) => {
+                const executionTime = Date.now() - startTime;
+                
+                // 清理临时文件
+                cleanupTempFiles([sourceFile, classFile]);
+                
+                res.json({
+                    output: output || '程序执行完成，无输出',
+                    error: errorOutput || (exitCode !== 0 ? `程序退出码: ${exitCode}` : null),
+                    executionTime: executionTime
+                });
+            });
+            
+            runProcess.on('error', (error) => {
+                const executionTime = Date.now() - startTime;
+                
+                // 清理临时文件
+                cleanupTempFiles([sourceFile, classFile]);
+                
+                res.json({
+                    output: '',
+                    error: 'Java程序执行失败: ' + error.message,
+                    executionTime: executionTime
+                });
+            });
+        });
+        
+        compileProcess.on('error', (error) => {
+            const executionTime = Date.now() - startTime;
+            
+            // 清理临时文件
+            cleanupTempFiles([sourceFile, classFile]);
+            
+            res.json({
+                output: '',
+                error: 'Java代码编译失败: ' + error.message,
+                executionTime: executionTime
+            });
+        });
+    });
+}
+
+// Go代码运行
+function runGo(code, input, res) {
+    const startTime = Date.now();
+    
+    // 检查Go是否安装
+    exec('go version', (error) => {
+        if (error) {
+            const executionTime = Date.now() - startTime;
+            return res.json({
+                output: '',
+                error: '未安装Go环境。请先安装Go语言。\n安装说明: https://golang.org/doc/install',
+                executionTime: executionTime
+            });
+        }
+        
+        // 创建临时文件
+        const tempFileName = 'temp_go_' + Date.now();
+        const sourceFile = path.join(__dirname, tempFileName + '.go');
+        
+        fs.writeFileSync(sourceFile, code);
+        
+        // 运行Go代码
+        const runProcess = spawn('go', ['run', sourceFile], {
+            timeout: 15000 // 15秒超时
+        });
+        
+        let output = '';
+        let errorOutput = '';
+        
+        // 如果有输入，发送给进程
+        if (input) {
+            runProcess.stdin.write(input);
+            runProcess.stdin.end();
+        }
+        
+        runProcess.stdout.on('data', (data) => {
+            output += data.toString();
+        });
+        
+        runProcess.stderr.on('data', (data) => {
+            errorOutput += data.toString();
+        });
+        
+        runProcess.on('close', (exitCode) => {
+            const executionTime = Date.now() - startTime;
+            
+            // 清理临时文件
+            cleanupTempFiles([sourceFile]);
+            
+            res.json({
+                output: output || '程序执行完成，无输出',
+                error: errorOutput || (exitCode !== 0 ? `程序退出码: ${exitCode}` : null),
+                executionTime: executionTime
+            });
+        });
+        
+        runProcess.on('error', (error) => {
+            const executionTime = Date.now() - startTime;
+            
+            // 清理临时文件
+            cleanupTempFiles([sourceFile]);
+            
+            res.json({
+                output: '',
+                error: 'Go程序执行失败: ' + error.message,
+                executionTime: executionTime
+            });
+        });
+    });
+}
+
+// C#代码运行
+function runCSharp(code, input, res) {
+    const startTime = Date.now();
+    
+    // 检查.NET是否安装
+    exec('dotnet --version', (error) => {
+        if (error) {
+            const executionTime = Date.now() - startTime;
+            return res.json({
+                output: '',
+                error: '未安装.NET环境。请先安装.NET SDK。\n安装命令: sudo snap install dotnet-sdk',
+                executionTime: executionTime
+            });
+        }
+        
+        // 创建临时文件
+        const tempFileName = 'temp_csharp_' + Date.now();
+        const sourceFile = path.join(__dirname, tempFileName + '.cs');
+        
+        fs.writeFileSync(sourceFile, code);
+        
+        // 编译并运行C#代码
+        const runProcess = spawn('dotnet', ['script', sourceFile], {
+            timeout: 15000 // 15秒超时
+        });
+        
+        let output = '';
+        let errorOutput = '';
+        
+        // 如果有输入，发送给进程
+        if (input) {
+            runProcess.stdin.write(input);
+            runProcess.stdin.end();
+        }
+        
+        runProcess.stdout.on('data', (data) => {
+            output += data.toString();
+        });
+        
+        runProcess.stderr.on('data', (data) => {
+            errorOutput += data.toString();
+        });
+        
+        runProcess.on('close', (exitCode) => {
+            const executionTime = Date.now() - startTime;
+            
+            // 清理临时文件
+            cleanupTempFiles([sourceFile]);
+            
+            res.json({
+                output: output || '程序执行完成，无输出',
+                error: errorOutput || (exitCode !== 0 ? `程序退出码: ${exitCode}` : null),
+                executionTime: executionTime
+            });
+        });
+        
+        runProcess.on('error', (error) => {
+            const executionTime = Date.now() - startTime;
+            
+            // 清理临时文件
+            cleanupTempFiles([sourceFile]);
+            
+            res.json({
+                output: '',
+                error: 'C#程序执行失败: ' + error.message,
+                executionTime: executionTime
+            });
+        });
+    });
+}
+
+// Rust代码运行
+function runRust(code, input, res) {
+    const startTime = Date.now();
+    
+    // 检查Rust是否安装
+    exec('rustc --version', (error) => {
+        if (error) {
+            const executionTime = Date.now() - startTime;
+            return res.json({
+                output: '',
+                error: '未安装Rust环境。请先安装Rust。\n安装命令: curl --proto \'=https\' --tlsv1.2 -sSf https://sh.rustup.rs | sh',
+                executionTime: executionTime
+            });
+        }
+        
+        // 创建临时文件
+        const tempFileName = 'temp_rust_' + Date.now();
+        const sourceFile = path.join(__dirname, tempFileName + '.rs');
+        const executableFile = path.join(__dirname, tempFileName);
+        
+        fs.writeFileSync(sourceFile, code);
+        
+        // 编译Rust代码
+        const compileProcess = spawn('rustc', ['-o', executableFile, sourceFile], {
+            timeout: 20000 // 20秒编译超时
+        });
+        
+        let compileOutput = '';
+        let compileError = '';
+        
+        compileProcess.stdout.on('data', (data) => {
+            compileOutput += data.toString();
+        });
+        
+        compileProcess.stderr.on('data', (data) => {
+            compileError += data.toString();
+        });
+        
+        compileProcess.on('close', (code) => {
+            if (code !== 0) {
+                // 编译失败
+                const executionTime = Date.now() - startTime;
+                
+                // 清理临时文件
+                cleanupTempFiles([sourceFile, executableFile]);
+                
+                res.json({
+                    output: compileOutput,
+                    error: `编译失败:\n${compileError}`,
+                    executionTime: executionTime
+                });
+                return;
+            }
+            
+            // 编译成功，运行程序
+            const runProcess = spawn(executableFile, [], {
+                timeout: 10000 // 10秒运行超时
+            });
+            
+            let output = '';
+            let errorOutput = '';
+            
+            // 如果有输入，发送给进程
+            if (input) {
+                runProcess.stdin.write(input);
+                runProcess.stdin.end();
+            }
+            
+            runProcess.stdout.on('data', (data) => {
+                output += data.toString();
+            });
+            
+            runProcess.stderr.on('data', (data) => {
+                errorOutput += data.toString();
+            });
+            
+            runProcess.on('close', (exitCode) => {
+                const executionTime = Date.now() - startTime;
+                
+                // 清理临时文件
+                cleanupTempFiles([sourceFile, executableFile]);
+                
+                res.json({
+                    output: output || '程序执行完成，无输出',
+                    error: errorOutput || (exitCode !== 0 ? `程序退出码: ${exitCode}` : null),
+                    executionTime: executionTime
+                });
+            });
+            
+            runProcess.on('error', (error) => {
+                const executionTime = Date.now() - startTime;
+                
+                // 清理临时文件
+                cleanupTempFiles([sourceFile, executableFile]);
+                
+                res.json({
+                    output: '',
+                    error: 'Rust程序执行失败: ' + error.message,
+                    executionTime: executionTime
+                });
+            });
+        });
+        
+        compileProcess.on('error', (error) => {
+            const executionTime = Date.now() - startTime;
+            
+            // 清理临时文件
+            cleanupTempFiles([sourceFile, executableFile]);
+            
+            res.json({
+                output: '',
+                error: 'Rust代码编译失败: ' + error.message,
+                executionTime: executionTime
+            });
+        });
+    });
 }
 
 
