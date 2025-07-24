@@ -1545,6 +1545,245 @@
             box-shadow: 0 6px 25px rgba(33, 150, 243, 0.3);
         }
 
+        /* 代码工具栏样式 */
+        .code-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            border-radius: 8px 8px 0 0;
+            margin-bottom: -2px;
+            z-index: 10;
+            position: relative;
+        }
+
+        .code-toolbar-left {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .code-toolbar-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .language-indicator {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .toolbar-btn {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .toolbar-btn:hover {
+            background: rgba(255,255,255,0.3);
+            transform: translateY(-1px);
+        }
+
+        .toolbar-btn.primary {
+            background: #28a745;
+        }
+
+        .toolbar-btn.primary:hover {
+            background: #218838;
+        }
+
+        .toolbar-btn.secondary {
+            background: #17a2b8;
+        }
+
+        .toolbar-btn.secondary:hover {
+            background: #138496;
+        }
+
+        /* 代码执行结果面板 */
+        .code-output-panel {
+            background: #1e1e1e;
+            color: #f8f8f2;
+            border: 2px solid #404040;
+            border-radius: 0 0 8px 8px;
+            margin-top: -2px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+
+        .output-header {
+            background: #2d2d2d;
+            padding: 8px 15px;
+            border-bottom: 1px solid #404040;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .output-content {
+            padding: 15px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .output-error {
+            color: #ff6b6b;
+        }
+
+        .output-success {
+            color: #51cf66;
+        }
+
+        .execution-time {
+            color: #868e96;
+            font-size: 11px;
+        }
+
+        /* 代码检查结果样式 */
+        .code-issues-panel {
+            background: white;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            margin-top: 10px;
+            max-height: 250px;
+            overflow-y: auto;
+        }
+
+        .issues-header {
+            background: #f8f9fa;
+            padding: 10px 15px;
+            border-bottom: 1px solid #e9ecef;
+            font-weight: 600;
+            color: #495057;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .issue-item {
+            padding: 10px 15px;
+            border-bottom: 1px solid #f1f3f4;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+
+        .issue-item:last-child {
+            border-bottom: none;
+        }
+
+        .issue-icon {
+            margin-top: 2px;
+            font-size: 14px;
+        }
+
+        .issue-icon.error {
+            color: #dc3545;
+        }
+
+        .issue-icon.warning {
+            color: #ffc107;
+        }
+
+        .issue-details {
+            flex: 1;
+        }
+
+        .issue-message {
+            color: #495057;
+            font-size: 14px;
+            margin-bottom: 3px;
+        }
+
+        .issue-location {
+            color: #6c757d;
+            font-size: 12px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        }
+
+        /* 输入对话框样式 */
+        .input-dialog {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+        }
+
+        .input-dialog-content {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            max-width: 500px;
+            width: 90%;
+        }
+
+        .input-dialog h3 {
+            margin-bottom: 15px;
+            color: #495057;
+        }
+
+        .input-dialog textarea {
+            width: 100%;
+            height: 120px;
+            padding: 10px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            resize: vertical;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 13px;
+        }
+
+        .input-dialog-buttons {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .input-dialog-buttons button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .input-dialog-buttons .cancel-btn {
+            background: #6c757d;
+            color: white;
+        }
+
+        .input-dialog-buttons .confirm-btn {
+            background: #28a745;
+            color: white;
+        }
+
         .edit-mode-view {
             margin-top: 10px;
         }

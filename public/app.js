@@ -808,11 +808,21 @@ async function loadFileFromServer(filePath) {
 // 渲染文件内容
 function renderFileContent(fileData) {
     const codeContainer = document.getElementById('codeContent');
+    const fileName = fileData.path.split('/').pop();
+    
+    // 检查是否应该显示工具栏
+    const showToolbar = shouldShowToolbar(fileName);
+    
+    // 更新工具栏信息
+    if (showToolbar) {
+        updateLanguageIndicator(fileName);
+        currentFile = fileData.path; // 确保设置了currentFile
+    }
     
     // 文件信息
     const fileInfo = `
         <div class="file-info">
-            <h3><i class="fas fa-file"></i> ${fileData.path.split('/').pop()}</h3>
+            <h3><i class="fas fa-file"></i> ${fileName}</h3>
             <p><strong>路径:</strong> ${fileData.path}</p>
             <p><strong>大小:</strong> ${formatFileSize(fileData.size)}</p>
             <p><strong>修改时间:</strong> ${new Date(fileData.modified).toLocaleString('zh-CN')}</p>
@@ -841,16 +851,58 @@ function renderFileContent(fileData) {
     const language = getLanguageFromExtension(fileData.extension);
     const highlightedCode = hljs.highlightAuto(fileData.content, [language]).value;
     
+    // 代码工具栏（如果支持的话）
+    const toolbarHtml = showToolbar ? `
+        <div class="code-toolbar" style="display: flex;">
+            <div class="code-toolbar-left">
+                <div class="language-indicator">${currentCodeLanguage.charAt(0).toUpperCase() + currentCodeLanguage.slice(1)}</div>
+                <span style="color: rgba(255,255,255,0.8); font-size: 12px;">${fileName}</span>
+            </div>
+            <div class="code-toolbar-right">
+                <button class="toolbar-btn secondary" onclick="checkCode()" title="代码检查">
+                    <i class="fas fa-check-circle"></i> 检查
+                </button>
+                <button class="toolbar-btn primary" onclick="runCode()" title="运行代码">
+                    <i class="fas fa-play"></i> 运行
+                </button>
+            </div>
+        </div>
+    ` : '';
+    
     const codeContent = `
         <div class="code-container">
             ${fileInfo}
+            ${toolbarHtml}
             <!-- 只读模式 -->
             <div id="readOnlyView" class="read-only-view">
-                <pre><code class="language-${language}">${highlightedCode}</code></pre>
+                <pre style="${showToolbar ? 'border-radius: 0 0 12px 12px; margin-top: -2px;' : ''}"><code class="language-${language}" id="codeDisplay">${highlightedCode}</code></pre>
             </div>
             <!-- 编辑模式 -->
             <div id="editModeView" class="edit-mode-view" style="display: none;">
                 <textarea id="codeEditor" class="code-editor">${fileData.content}</textarea>
+            </div>
+            
+            <!-- 代码检查结果面板 -->
+            <div class="code-issues-panel" id="codeIssuesPanel" style="display: none;">
+                <div class="issues-header">
+                    <span>代码检查结果</span>
+                    <button class="toolbar-btn" onclick="hideIssuesPanel()" style="padding: 4px 8px; font-size: 11px;">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div id="issuesContent"></div>
+            </div>
+            
+            <!-- 代码执行结果面板 -->
+            <div class="code-output-panel" id="codeOutputPanel" style="display: none;">
+                <div class="output-header">
+                    <span>执行结果</span>
+                    <span class="execution-time" id="executionTime"></span>
+                    <button class="toolbar-btn" onclick="hideOutputPanel()" style="padding: 4px 8px; font-size: 11px;">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="output-content" id="outputContent"></div>
             </div>
         </div>
     `;
@@ -859,6 +911,10 @@ function renderFileContent(fileData) {
     
     // 设置编辑器样式和快捷键
     setupCodeEditor();
+    
+    // 隐藏之前的结果面板
+    hideIssuesPanel();
+    hideOutputPanel();
 }
 
 // 下载当前文件
@@ -4539,4 +4595,348 @@ function setupSidebarResize() {
     });
 
     console.log('侧边栏宽度调整功能已初始化');
+}
+
+// 代码检查和运行功能
+let currentCodeLanguage = 'javascript';
+let currentCodeFileName = '';
+
+// 语言检测函数
+function detectLanguage(filename) {
+    const ext = filename.split('.').pop().toLowerCase();
+    const extensionMap = {
+        'js': 'javascript',
+        'jsx': 'javascript', 
+        'ts': 'typescript',
+        'tsx': 'typescript',
+        'py': 'python',
+        'java': 'java',
+        'cpp': 'cpp',
+        'cc': 'cpp',
+        'cxx': 'cpp',
+        'c': 'c',
+        'go': 'go',
+        'rs': 'rust',
+        'php': 'php',
+        'rb': 'ruby',
+        'sh': 'bash',
+        'bat': 'batch',
+        'html': 'html',
+        'css': 'css',
+        'json': 'json'
+    };
+    
+    return extensionMap[ext] || 'text';
+}
+
+// 更新语言指示器
+function updateLanguageIndicator(filename) {
+    currentCodeLanguage = detectLanguage(filename);
+    currentCodeFileName = filename;
+    
+    const indicator = document.getElementById('languageIndicator');
+    const fileDisplay = document.getElementById('fileNameDisplay');
+    
+    if (indicator) {
+        indicator.textContent = currentCodeLanguage.charAt(0).toUpperCase() + currentCodeLanguage.slice(1);
+    }
+    
+    if (fileDisplay) {
+        fileDisplay.textContent = filename;
+    }
+}
+
+// 显示代码工具栏
+function showCodeToolbar() {
+    const toolbar = document.getElementById('codeToolbar');
+    if (toolbar) {
+        toolbar.style.display = 'flex';
+    }
+}
+
+// 隐藏代码工具栏
+function hideCodeToolbar() {
+    const toolbar = document.getElementById('codeToolbar');
+    if (toolbar) {
+        toolbar.style.display = 'none';
+    }
+}
+
+// 代码检查功能
+async function checkCode() {
+    if (!currentFile || !currentFileContent) {
+        showNotification('请先选择一个代码文件', 'warning');
+        return;
+    }
+    
+    // 获取当前显示的代码内容（可能是编辑过的）
+    let code = currentFileContent;
+    const editModeView = document.getElementById('editModeView');
+    const codeEditor = document.getElementById('codeEditor');
+    
+    // 如果处于编辑模式，使用编辑器中的内容
+    if (editModeView && editModeView.style.display !== 'none' && codeEditor) {
+        code = codeEditor.value;
+    }
+    
+    try {
+        showNotification('正在检查代码...', 'info');
+        
+        const response = await fetch('/api/code/check', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+            },
+            body: JSON.stringify({
+                code: code,
+                language: currentCodeLanguage,
+                filename: currentCodeFileName
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            displayCodeIssues(result);
+            showNotification('代码检查完成', 'success');
+        } else {
+            showNotification('代码检查失败: ' + result.error, 'error');
+        }
+    } catch (error) {
+        console.error('代码检查失败:', error);
+        showNotification('代码检查失败: ' + error.message, 'error');
+    }
+}
+
+// 显示代码检查结果
+function displayCodeIssues(result) {
+    const issuesPanel = document.getElementById('codeIssuesPanel');
+    const issuesContent = document.getElementById('issuesContent');
+    
+    if (!issuesPanel || !issuesContent) return;
+    
+    issuesContent.innerHTML = '';
+    
+    const totalIssues = result.errors.length + result.warnings.length;
+    
+    if (totalIssues === 0) {
+        issuesContent.innerHTML = `
+            <div class="issue-item">
+                <div class="issue-icon" style="color: #28a745;">
+                    <i class="fas fa-check-circle"></i>
+                </div>
+                <div class="issue-details">
+                    <div class="issue-message">代码检查通过，未发现问题！</div>
+                </div>
+            </div>
+        `;
+    } else {
+        // 显示错误
+        result.errors.forEach(error => {
+            const errorElement = document.createElement('div');
+            errorElement.className = 'issue-item';
+            errorElement.innerHTML = `
+                <div class="issue-icon error">
+                    <i class="fas fa-times-circle"></i>
+                </div>
+                <div class="issue-details">
+                    <div class="issue-message">${error.message}</div>
+                    <div class="issue-location">第 ${error.line} 行, 第 ${error.column} 列</div>
+                </div>
+            `;
+            issuesContent.appendChild(errorElement);
+        });
+        
+        // 显示警告
+        result.warnings.forEach(warning => {
+            const warningElement = document.createElement('div');
+            warningElement.className = 'issue-item';
+            warningElement.innerHTML = `
+                <div class="issue-icon warning">
+                    <i class="fas fa-exclamation-triangle"></i>
+                </div>
+                <div class="issue-details">
+                    <div class="issue-message">${warning.message}</div>
+                    <div class="issue-location">第 ${warning.line} 行, 第 ${warning.column} 列</div>
+                </div>
+            `;
+            issuesContent.appendChild(warningElement);
+        });
+    }
+    
+    // 更新标题显示问题数量
+    const header = issuesPanel.querySelector('.issues-header span');
+    if (header) {
+        header.textContent = `代码检查结果 (${result.errors.length} 错误, ${result.warnings.length} 警告)`;
+    }
+    
+    issuesPanel.style.display = 'block';
+}
+
+// 隐藏检查结果面板
+function hideIssuesPanel() {
+    const issuesPanel = document.getElementById('codeIssuesPanel');
+    if (issuesPanel) {
+        issuesPanel.style.display = 'none';
+    }
+}
+
+// 代码运行功能
+async function runCode() {
+    if (!currentFile || !currentFileContent) {
+        showNotification('请先选择一个代码文件', 'warning');
+        return;
+    }
+    
+    // 获取当前显示的代码内容（可能是编辑过的）
+    let code = currentFileContent;
+    const editModeView = document.getElementById('editModeView');
+    const codeEditor = document.getElementById('codeEditor');
+    
+    // 如果处于编辑模式，使用编辑器中的内容
+    if (editModeView && editModeView.style.display !== 'none' && codeEditor) {
+        code = codeEditor.value;
+    }
+    
+    // 检查是否支持运行该语言
+    const supportedLanguages = ['javascript', 'python', 'html'];
+    if (!supportedLanguages.includes(currentCodeLanguage)) {
+        showNotification(`暂不支持运行 ${currentCodeLanguage} 语言`, 'warning');
+        return;
+    }
+    
+    // 对于某些语言，可能需要输入
+    let input = '';
+    if (currentCodeLanguage === 'python') {
+        input = await showInputDialog('输入程序运行时的输入数据（可选）：');
+        if (input === null) return; // 用户取消
+    }
+    
+    try {
+        showNotification('正在运行代码...', 'info');
+        
+        const response = await fetch('/api/code/run', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+            },
+            body: JSON.stringify({
+                code: code,
+                language: currentCodeLanguage,
+                filename: currentCodeFileName,
+                input: input
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            displayCodeOutput(result);
+            if (result.error) {
+                showNotification('代码运行完成，但有错误', 'warning');
+            } else {
+                showNotification('代码运行完成', 'success');
+            }
+        } else {
+            showNotification('代码运行失败: ' + result.error, 'error');
+        }
+    } catch (error) {
+        console.error('代码运行失败:', error);
+        showNotification('代码运行失败: ' + error.message, 'error');
+    }
+}
+
+// 显示代码运行结果
+function displayCodeOutput(result) {
+    const outputPanel = document.getElementById('codeOutputPanel');
+    const outputContent = document.getElementById('outputContent');
+    const executionTime = document.getElementById('executionTime');
+    
+    if (!outputPanel || !outputContent) return;
+    
+    // 更新执行时间
+    if (executionTime) {
+        executionTime.textContent = `执行时间: ${result.executionTime}ms`;
+    }
+    
+    // 清空之前的内容
+    outputContent.innerHTML = '';
+    outputContent.className = 'output-content';
+    
+    if (result.error) {
+        outputContent.className += ' output-error';
+        outputContent.textContent = result.error;
+    } else {
+        outputContent.className += ' output-success';
+        outputContent.textContent = result.output;
+    }
+    
+    // 如果是HTML，显示预览链接
+    if (result.previewUrl) {
+        const previewLink = document.createElement('div');
+        previewLink.innerHTML = `
+            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #404040;">
+                <a href="${result.previewUrl}" target="_blank" style="color: #51cf66; text-decoration: underline;">
+                    📄 在新窗口中预览HTML
+                </a>
+            </div>
+        `;
+        outputContent.appendChild(previewLink);
+    }
+    
+    outputPanel.style.display = 'block';
+}
+
+// 隐藏输出面板
+function hideOutputPanel() {
+    const outputPanel = document.getElementById('codeOutputPanel');
+    if (outputPanel) {
+        outputPanel.style.display = 'none';
+    }
+}
+
+// 显示输入对话框
+function showInputDialog(message) {
+    return new Promise((resolve) => {
+        const dialog = document.createElement('div');
+        dialog.className = 'input-dialog';
+        dialog.innerHTML = `
+            <div class="input-dialog-content">
+                <h3>${message}</h3>
+                <textarea id="inputTextarea" placeholder="请输入数据..."></textarea>
+                <div class="input-dialog-buttons">
+                    <button class="cancel-btn" onclick="this.closest('.input-dialog').remove(); window.inputDialogResolve(null);">取消</button>
+                    <button class="confirm-btn" onclick="window.inputDialogResolve(document.getElementById('inputTextarea').value); this.closest('.input-dialog').remove();">确定</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(dialog);
+        document.getElementById('inputTextarea').focus();
+        
+        // 设置全局回调函数
+        window.inputDialogResolve = resolve;
+        
+        // ESC键取消
+        const handleKeyDown = (e) => {
+            if (e.key === 'Escape') {
+                dialog.remove();
+                resolve(null);
+                document.removeEventListener('keydown', handleKeyDown);
+            }
+        };
+        document.addEventListener('keydown', handleKeyDown);
+    });
+}
+
+// 判断是否应该显示工具栏
+function shouldShowToolbar(filename) {
+    const codeExtensions = [
+        'js', 'jsx', 'ts', 'tsx', 'py', 'java', 'cpp', 'cc', 'cxx', 'c', 
+        'go', 'rs', 'php', 'rb', 'sh', 'bat', 'html', 'css', 'json'
+    ];
+    const ext = filename.split('.').pop().toLowerCase();
+    return codeExtensions.includes(ext);
 }

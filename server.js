@@ -2157,6 +2157,469 @@ app.get('/api/projects/:projectId/structure', (req, res) => {
 
 // 搜索文件和内容
 
+// 代码检查和运行功能
+const { spawn, exec } = require('child_process');
+const { VM } = require('vm2');
+
+// 语言检测函数
+function detectLanguage(filename, content) {
+    const ext = path.extname(filename).toLowerCase();
+    const extensionMap = {
+        '.js': 'javascript',
+        '.jsx': 'javascript',
+        '.ts': 'typescript',
+        '.tsx': 'typescript',
+        '.py': 'python',
+        '.java': 'java',
+        '.cpp': 'cpp',
+        '.cc': 'cpp',
+        '.cxx': 'cpp',
+        '.c': 'c',
+        '.go': 'go',
+        '.rs': 'rust',
+        '.php': 'php',
+        '.rb': 'ruby',
+        '.sh': 'bash',
+        '.bat': 'batch',
+        '.html': 'html',
+        '.css': 'css',
+        '.json': 'json'
+    };
+    
+    return extensionMap[ext] || 'text';
+}
+
+// 代码语法检查API
+app.post('/api/code/check', requireAuth, (req, res) => {
+    const { code, language, filename } = req.body;
+    
+    if (!code) {
+        return res.status(400).json({ error: '代码内容不能为空' });
+    }
+    
+    const detectedLang = language || detectLanguage(filename, code);
+    
+    try {
+        let result = { language: detectedLang, errors: [], warnings: [] };
+        
+        switch (detectedLang) {
+            case 'javascript':
+            case 'jsx':
+                result = checkJavaScript(code, filename);
+                break;
+            case 'typescript':
+            case 'tsx':
+                result = checkTypeScript(code, filename);
+                break;
+            case 'python':
+                result = checkPython(code, filename);
+                break;
+            case 'json':
+                result = checkJSON(code);
+                break;
+            default:
+                result.warnings.push({
+                    line: 1,
+                    column: 1,
+                    message: `暂不支持 ${detectedLang} 语言的语法检查`,
+                    severity: 'warning'
+                });
+        }
+        
+        res.json(result);
+    } catch (error) {
+        console.error('代码检查失败:', error);
+        res.status(500).json({ error: '代码检查失败: ' + error.message });
+    }
+});
+
+// 代码运行API
+app.post('/api/code/run', requireAuth, (req, res) => {
+    const { code, language, filename, input = '' } = req.body;
+    
+    if (!code) {
+        return res.status(400).json({ error: '代码内容不能为空' });
+    }
+    
+    const detectedLang = language || detectLanguage(filename, code);
+    
+    try {
+        switch (detectedLang) {
+            case 'javascript':
+            case 'jsx':
+                runJavaScript(code, input, res);
+                break;
+            case 'python':
+                runPython(code, input, res);
+                break;
+            case 'html':
+                runHTML(code, res);
+                break;
+            default:
+                res.status(400).json({ 
+                    error: `暂不支持运行 ${detectedLang} 语言`,
+                    output: '',
+                    executionTime: 0
+                });
+        }
+    } catch (error) {
+        console.error('代码运行失败:', error);
+        res.status(500).json({ 
+            error: '代码运行失败: ' + error.message,
+            output: '',
+            executionTime: 0
+        });
+    }
+});
+
+// JavaScript语法检查
+function checkJavaScript(code, filename) {
+    const result = {
+        language: 'javascript',
+        errors: [],
+        warnings: []
+    };
+    
+    try {
+        // 使用Node.js内置的VM模块进行语法检查
+        const vm = require('vm');
+        const script = new vm.Script(code, { 
+            filename: filename || 'code.js',
+            lineOffset: 0,
+            columnOffset: 0
+        });
+        
+        // 如果能成功创建Script对象，说明语法正确
+        result.warnings.push({
+            line: 1,
+            column: 1,
+            message: 'JavaScript语法检查通过',
+            severity: 'info'
+        });
+        
+    } catch (error) {
+        // 解析语法错误
+        let line = 1;
+        let column = 1;
+        
+        // 尝试从错误消息中提取行号
+        const lineMatch = error.message.match(/line (\d+)/i);
+        if (lineMatch) {
+            line = parseInt(lineMatch[1]);
+        }
+        
+        // 尝试从错误消息中提取列号
+        const columnMatch = error.message.match(/column (\d+)/i);
+        if (columnMatch) {
+            column = parseInt(columnMatch[1]);
+        }
+        
+        // 尝试从堆栈中获取更精确的位置信息
+        if (error.stack) {
+            const stackMatch = error.stack.match(/:(\d+):(\d+)/);
+            if (stackMatch) {
+                line = parseInt(stackMatch[1]) || line;
+                column = parseInt(stackMatch[2]) || column;
+            }
+        }
+        
+        result.errors.push({
+            line: line,
+            column: column,
+            message: error.message,
+            severity: 'error'
+        });
+    }
+    
+    // 简单的静态分析检查
+    const lines = code.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const lineNum = i + 1;
+        
+        // 检查常见问题
+        if (line.includes('console.log') && !line.includes('//')) {
+            result.warnings.push({
+                line: lineNum,
+                column: line.indexOf('console.log') + 1,
+                message: '建议在生产环境中移除console.log',
+                severity: 'warning'
+            });
+        }
+        
+        // 检查未声明的变量（简单版）
+        if (line.match(/^\s*[a-zA-Z_$][a-zA-Z0-9_$]*\s*=/) && 
+            !line.includes('var ') && !line.includes('let ') && !line.includes('const ')) {
+            result.warnings.push({
+                line: lineNum,
+                column: 1,
+                message: '建议使用let、const或var声明变量',
+                severity: 'warning'
+            });
+        }
+    }
+    
+    return result;
+}
+
+// TypeScript语法检查（简化版）
+function checkTypeScript(code, filename) {
+    // 目前简化为JavaScript检查，后续可扩展
+    const result = checkJavaScript(code, filename);
+    result.language = 'typescript';
+    return result;
+}
+
+// Python语法检查
+function checkPython(code, filename) {
+    const result = {
+        language: 'python',
+        errors: [],
+        warnings: []
+    };
+    
+    // 简单的Python语法检查
+    try {
+        // 检查基本语法错误
+        const lines = code.split('\n');
+        let indentLevel = 0;
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const lineNum = i + 1;
+            
+            // 检查缩进
+            const leadingSpaces = line.match(/^(\s*)/)[1].length;
+            if (line.trim() && leadingSpaces % 4 !== 0) {
+                result.warnings.push({
+                    line: lineNum,
+                    column: 1,
+                    message: '建议使用4个空格缩进',
+                    severity: 'warning'
+                });
+            }
+            
+            // 检查语法结构
+            if (line.includes('def ') && !line.endsWith(':')) {
+                result.errors.push({
+                    line: lineNum,
+                    column: line.length,
+                    message: '函数定义缺少冒号',
+                    severity: 'error'
+                });
+            }
+            
+            if ((line.includes('if ') || line.includes('for ') || line.includes('while ')) && 
+                !line.endsWith(':') && line.trim()) {
+                result.errors.push({
+                    line: lineNum,
+                    column: line.length,
+                    message: '控制结构缺少冒号',
+                    severity: 'error'
+                });
+            }
+        }
+    } catch (error) {
+        result.errors.push({
+            line: 1,
+            column: 1,
+            message: '语法检查出错: ' + error.message,
+            severity: 'error'
+        });
+    }
+    
+    return result;
+}
+
+// JSON语法检查
+function checkJSON(code) {
+    const result = {
+        language: 'json',
+        errors: [],
+        warnings: []
+    };
+    
+    try {
+        JSON.parse(code);
+    } catch (error) {
+        const match = error.message.match(/position (\d+)/);
+        const position = match ? parseInt(match[1]) : 1;
+        
+        // 计算行号和列号
+        const lines = code.substring(0, position).split('\n');
+        const line = lines.length;
+        const column = lines[lines.length - 1].length + 1;
+        
+        result.errors.push({
+            line: line,
+            column: column,
+            message: error.message,
+            severity: 'error'
+        });
+    }
+    
+    return result;
+}
+
+// JavaScript代码运行
+function runJavaScript(code, input, res) {
+    const startTime = Date.now();
+    
+    try {
+        const vm = new VM({
+            timeout: 5000, // 5秒超时
+            sandbox: {
+                console: {
+                    log: (...args) => {
+                        output += args.join(' ') + '\n';
+                    },
+                    error: (...args) => {
+                        output += 'Error: ' + args.join(' ') + '\n';
+                    }
+                },
+                input: input,
+                setTimeout: setTimeout,
+                setInterval: setInterval,
+                clearTimeout: clearTimeout,
+                clearInterval: clearInterval
+            }
+        });
+        
+        let output = '';
+        
+        // 包装代码以捕获返回值
+        const wrappedCode = `
+            ${code}
+        `;
+        
+        const result = vm.run(wrappedCode);
+        
+        if (result !== undefined) {
+            output += 'Return value: ' + String(result) + '\n';
+        }
+        
+        const executionTime = Date.now() - startTime;
+        
+        res.json({
+            output: output || '执行完成，无输出',
+            error: null,
+            executionTime: executionTime
+        });
+        
+    } catch (error) {
+        const executionTime = Date.now() - startTime;
+        res.json({
+            output: '',
+            error: error.message,
+            executionTime: executionTime
+        });
+    }
+}
+
+// Python代码运行
+function runPython(code, input, res) {
+    const startTime = Date.now();
+    
+    // 创建临时文件
+    const tempFile = path.join(__dirname, 'temp_python_' + Date.now() + '.py');
+    
+    fs.writeFileSync(tempFile, code);
+    
+    const pythonProcess = spawn('python3', [tempFile], {
+        timeout: 10000 // 10秒超时
+    });
+    
+    let output = '';
+    let errorOutput = '';
+    
+    // 如果有输入，发送给进程
+    if (input) {
+        pythonProcess.stdin.write(input);
+        pythonProcess.stdin.end();
+    }
+    
+    pythonProcess.stdout.on('data', (data) => {
+        output += data.toString();
+    });
+    
+    pythonProcess.stderr.on('data', (data) => {
+        errorOutput += data.toString();
+    });
+    
+    pythonProcess.on('close', (code) => {
+        const executionTime = Date.now() - startTime;
+        
+        // 清理临时文件
+        try {
+            fs.unlinkSync(tempFile);
+        } catch (e) {
+            console.error('清理临时文件失败:', e);
+        }
+        
+        res.json({
+            output: output || '执行完成，无输出',
+            error: errorOutput || (code !== 0 ? `进程退出码: ${code}` : null),
+            executionTime: executionTime
+        });
+    });
+    
+    pythonProcess.on('error', (error) => {
+        const executionTime = Date.now() - startTime;
+        
+        // 清理临时文件
+        try {
+            fs.unlinkSync(tempFile);
+        } catch (e) {
+            console.error('清理临时文件失败:', e);
+        }
+        
+        res.json({
+            output: '',
+            error: 'Python执行失败: ' + error.message,
+            executionTime: executionTime
+        });
+    });
+}
+
+// HTML代码运行（返回预览URL）
+function runHTML(code, res) {
+    const startTime = Date.now();
+    
+    try {
+        // 创建临时HTML文件
+        const tempFile = path.join(__dirname, 'public', 'temp_html_' + Date.now() + '.html');
+        
+        fs.writeFileSync(tempFile, code);
+        
+        const executionTime = Date.now() - startTime;
+        const fileName = path.basename(tempFile);
+        
+        res.json({
+            output: '生成HTML文件成功',
+            error: null,
+            executionTime: executionTime,
+            previewUrl: `http://localhost:${PORT}/${fileName}`
+        });
+        
+        // 5分钟后清理临时文件
+        setTimeout(() => {
+            try {
+                fs.unlinkSync(tempFile);
+            } catch (e) {
+                console.error('清理临时HTML文件失败:', e);
+            }
+        }, 5 * 60 * 1000);
+        
+    } catch (error) {
+        const executionTime = Date.now() - startTime;
+        res.json({
+            output: '',
+            error: 'HTML文件生成失败: ' + error.message,
+            executionTime: executionTime
+        });
+    }
+}
+
 
 app.listen(PORT, () => {
   console.log(`代码可视化分析器运行在 http://localhost:${PORT}`);
