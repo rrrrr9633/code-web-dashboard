@@ -95,6 +95,17 @@ db.serialize(() => {
         FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE,
         UNIQUE(project_id)
     )`);
+    
+    // AI对话历史记录表
+    db.run(`CREATE TABLE IF NOT EXISTS chat_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        chat_session_id TEXT NOT NULL,
+        messages TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+    )`);
 });
 
 console.log('数据库初始化完成:', dbPath);
@@ -150,6 +161,7 @@ async function requireAuth(req, res, next) {
         // 将用户信息添加到请求对象
         req.user = {
             id: userSession.user_id,
+            user_id: userSession.user_id, // 添加这个字段以保持向后兼容
             username: userSession.username,
             sessionToken: token
         };
@@ -452,6 +464,21 @@ function identifyAIProvider(apiUrl) {
     }
     
     return 'Custom API';
+}
+
+// 根据API URL获取对应的默认模型
+function getModelForProvider(apiUrl) {
+    if (!apiUrl) return 'gpt-3.5-turbo'; // 默认模型
+    
+    const url = apiUrl.toLowerCase();
+    if (url.includes('deepseek')) return 'deepseek-chat';
+    if (url.includes('openai') || url.includes('api.openai.com')) return 'gpt-3.5-turbo';
+    if (url.includes('anthropic') || url.includes('claude')) return 'claude-3-sonnet-20240229';
+    if (url.includes('gemini') || url.includes('googleapis')) return 'gemini-pro';
+    if (url.includes('groq')) return 'mixtral-8x7b-32768';
+    
+    // 默认使用 OpenAI 兼容格式
+    return 'gpt-3.5-turbo';
 }
 
 // 检查AI配置状态
@@ -1907,8 +1934,10 @@ ${code}
         break;
     }
     
+    const modelName = getModelForProvider(userConfig.ai_api_url);
+    
     const response = await axios.post(userConfig.ai_api_url, {
-      model: 'deepseek-chat',
+      model: modelName,
       messages: [
         {
           role: 'user',
@@ -1955,8 +1984,9 @@ ${code}
 // 测试AI连接
 async function testAIConnection(apiUrl, apiKey) {
     try {
+        const modelName = getModelForProvider(apiUrl);
         const response = await axios.post(apiUrl, {
-            model: 'deepseek-chat',
+            model: modelName,
             messages: [
                 { role: 'user', content: '测试连接，请回复"连接成功"' }
             ],
@@ -2160,9 +2190,10 @@ ${projectSummary}
 
                 console.log('🤖 发送AI分析请求，项目摘要长度:', projectSummary.length);
 
+                const modelName = getModelForProvider(userConfig.ai_api_url);
                 const response = await Promise.race([
                     axios.post(userConfig.ai_api_url, {
-                        model: 'deepseek-chat',
+                        model: modelName,
                         messages: [
                             {
                                 role: 'user',
@@ -4313,6 +4344,173 @@ function runRust(code, input, res) {
         });
     });
 }
+
+// AI对话历史记录API接口
+
+// 保存对话记录
+app.post('/api/chat/save', requireAuth, (req, res) => {
+    const { chat_session_id, messages } = req.body;
+    const user_id = req.user.user_id;
+
+    if (!chat_session_id || !messages) {
+        return res.status(400).json({ error: '缺少必要参数' });
+    }
+
+    const stmt = db.prepare(`
+        INSERT OR REPLACE INTO chat_history (user_id, chat_session_id, messages, updated_at)
+        VALUES (?, ?, ?, datetime('now'))
+    `);
+
+    stmt.run([user_id, chat_session_id, JSON.stringify(messages)], function(err) {
+        if (err) {
+            console.error('保存对话记录失败:', err);
+            return res.status(500).json({ error: '保存对话记录失败' });
+        }
+        res.json({ success: true, id: this.lastID });
+    });
+
+    stmt.finalize();
+});
+
+// 获取对话历史记录列表
+app.get('/api/chat/history', requireAuth, (req, res) => {
+    const user_id = req.user.user_id;
+
+    db.all(`
+        SELECT id, chat_session_id, messages, created_at, updated_at
+        FROM chat_history 
+        WHERE user_id = ? 
+        ORDER BY updated_at DESC 
+        LIMIT 10
+    `, [user_id], (err, rows) => {
+        if (err) {
+            console.error('获取对话历史失败:', err);
+            return res.status(500).json({ error: '获取对话历史失败' });
+        }
+
+        const history = rows.map(row => ({
+            id: row.id,
+            chat_session_id: row.chat_session_id,
+            messages: JSON.parse(row.messages),
+            created_at: row.created_at,
+            updated_at: row.updated_at
+        }));
+
+        res.json({ history });
+    });
+});
+
+// 删除指定对话记录
+app.delete('/api/chat/history/:id', requireAuth, (req, res) => {
+    const chat_id = req.params.id;
+    const user_id = req.user.user_id;
+
+    db.run(`
+        DELETE FROM chat_history 
+        WHERE id = ? AND user_id = ?
+    `, [chat_id, user_id], function(err) {
+        if (err) {
+            console.error('删除对话记录失败:', err);
+            return res.status(500).json({ error: '删除对话记录失败' });
+        }
+
+        if (this.changes === 0) {
+            return res.status(404).json({ error: '对话记录不存在或无权限删除' });
+        }
+
+        res.json({ success: true });
+    });
+});
+
+// 清空所有对话记录
+app.delete('/api/chat/history', requireAuth, (req, res) => {
+    const user_id = req.user.user_id;
+
+    db.run(`
+        DELETE FROM chat_history 
+        WHERE user_id = ?
+    `, [user_id], function(err) {
+        if (err) {
+            console.error('清空对话记录失败:', err);
+            return res.status(500).json({ error: '清空对话记录失败' });
+        }
+
+        res.json({ success: true, deleted_count: this.changes });
+    });
+});
+
+// AI聊天API接口
+app.post('/api/chat', requireAuth, async (req, res) => {
+    const { message } = req.body;
+    const user_id = req.user.user_id;
+
+    console.log('收到AI聊天请求:', { user_id, message: message?.substring(0, 50) + '...' });
+
+    if (!message) {
+        return res.status(400).json({ error: '缺少消息内容' });
+    }
+
+    try {
+        // 获取用户的AI配置
+        const userAIConfig = await new Promise((resolve, reject) => {
+            db.get(
+                'SELECT ai_api_url, ai_api_key FROM users WHERE id = ?',
+                [user_id],
+                (err, row) => {
+                    if (err) reject(err);
+                    else resolve(row);
+                }
+            );
+        });
+
+        console.log('用户AI配置:', { 
+            user_id, 
+            hasConfig: !!userAIConfig,
+            hasUrl: !!userAIConfig?.ai_api_url,
+            hasKey: !!userAIConfig?.ai_api_key,
+            url: userAIConfig?.ai_api_url
+        });
+
+        if (!userAIConfig || !userAIConfig.ai_api_url || !userAIConfig.ai_api_key) {
+            return res.status(400).json({ error: '请先配置AI API设置' });
+        }
+
+        // 调用AI API
+        const modelName = getModelForProvider(userAIConfig.ai_api_url);
+        console.log('使用模型:', modelName, '提供商URL:', userAIConfig.ai_api_url);
+        
+        const aiResponse = await axios.post(userAIConfig.ai_api_url, {
+            model: modelName,
+            messages: [
+                {
+                    role: "system",
+                    content: "你是一个友善的AI助手，请用中文回答用户的问题。"
+                },
+                {
+                    role: "user",
+                    content: message
+                }
+            ],
+            temperature: 0.7,
+            max_tokens: 2000
+        }, {
+            headers: {
+                'Authorization': `Bearer ${userAIConfig.ai_api_key}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const aiMessage = aiResponse.data.choices[0].message.content;
+        res.json({ message: aiMessage });
+
+    } catch (error) {
+        console.error('AI聊天失败:', error);
+        res.status(500).json({ 
+            error: 'AI服务暂时不可用',
+            details: error.response?.data?.error?.message || error.message
+        });
+    }
+});
 
 
 app.listen(PORT, () => {

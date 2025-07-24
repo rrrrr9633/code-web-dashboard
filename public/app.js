@@ -6718,3 +6718,494 @@ function getSelectedTreeItem() {
         name: path.split('/').pop()
     };
 }
+
+// ============ AI对话功能 ============
+
+// 对话相关变量
+let currentChatSession = null;
+let chatMessages = [];
+let chatHistoryList = [];
+
+// 生成对话会话ID
+function generateChatSessionId() {
+    return 'chat_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+}
+
+// 打开AI对话面板
+function openAIChatPanel() {
+    // 保存当前滚动位置
+    const currentScrollX = window.scrollX;
+    const currentScrollY = window.scrollY;
+    
+    const chatPanel = document.getElementById('aiChatPanel');
+    const aiPanel = document.getElementById('aiPanel');
+    
+    // 如果AI分析面板打开，先关闭它
+    if (aiPanel.classList.contains('open')) {
+        aiPanel.classList.remove('open');
+    }
+    
+    // 如果面板当前是打开的，关闭时重置样式
+    if (chatPanel.classList.contains('open')) {
+        chatPanel.classList.remove('open');
+        // 重置面板位置和样式，确保下次打开时位置正确
+        chatPanel.style.position = '';
+        chatPanel.style.left = '';
+        chatPanel.style.top = '';
+        chatPanel.style.right = '';
+        chatPanel.style.transform = '';
+    } else {
+        // 打开面板
+        chatPanel.classList.add('open');
+        
+        // 如果是第一次打开或没有当前会话，开始新对话
+        if (!currentChatSession) {
+            startNewChat();
+        }
+        
+        // 设置拖拽功能
+        setupChatPanelDrag();
+        setupChatPanelResize();
+        setupChatInput();
+    }
+    
+    // 恢复滚动位置（防止页面跳转）
+    setTimeout(() => {
+        window.scrollTo(currentScrollX, currentScrollY);
+    }, 0);
+}
+
+// 开始新对话
+function startNewChat() {
+    // 保存当前对话（如果有消息）
+    if (currentChatSession && chatMessages.length > 0) {
+        saveChatHistory();
+    }
+    
+    // 重置对话状态
+    currentChatSession = generateChatSessionId();
+    chatMessages = [];
+    
+    // 清空对话区域并显示欢迎消息
+    const chatMessagesContainer = document.getElementById('chatMessages');
+    chatMessagesContainer.innerHTML = `
+        <div class="welcome-message">
+            <i class="fas fa-robot"></i>
+            <p>您好！我是您的AI助手，有什么可以帮助您的吗？</p>
+        </div>
+    `;
+    
+    // 聚焦输入框（防止滚动）
+    const chatInput = document.getElementById('chatInput');
+    if (chatInput) {
+        chatInput.focus({ preventScroll: true });
+    }
+}
+
+// 发送聊天消息
+async function sendChatMessage() {
+    const chatInput = document.getElementById('chatInput');
+    const message = chatInput.value.trim();
+    
+    if (!message) return;
+    
+    // 检查认证
+    const token = localStorage.getItem('authToken');
+    if (!token) {
+        alert('请先登录');
+        return;
+    }
+    
+    // 清空输入框并禁用发送按钮
+    chatInput.value = '';
+    const sendBtn = document.querySelector('.send-btn');
+    sendBtn.disabled = true;
+    
+    // 添加用户消息到界面
+    addChatMessage('user', message);
+    
+    // 添加加载消息
+    const loadingMessage = addChatMessage('ai', '正在思考中...');
+    
+    try {
+        // 发送到后端API
+        const response = await fetch('/api/chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ message })
+        });
+        
+        const data = await response.json();
+        
+        console.log('AI聊天响应:', { status: response.status, data });
+        
+        if (response.ok) {
+            // 移除加载消息并添加AI回复
+            loadingMessage.remove();
+            addChatMessage('ai', data.message);
+            
+            // 保存对话历史
+            saveChatHistory();
+        } else {
+            loadingMessage.textContent = data.error || '发送消息时出现错误';
+            console.error('AI聊天错误:', data);
+        }
+    } catch (error) {
+        console.error('发送消息失败:', error);
+        loadingMessage.textContent = '网络错误，请稍后重试';
+    } finally {
+        // 重新启用发送按钮
+        sendBtn.disabled = false;
+    }
+}
+
+// 添加聊天消息到界面
+function addChatMessage(sender, content) {
+    const chatMessagesContainer = document.getElementById('chatMessages');
+    
+    // 移除欢迎消息（如果存在）
+    const welcomeMessage = chatMessagesContainer.querySelector('.welcome-message');
+    if (welcomeMessage) {
+        welcomeMessage.remove();
+    }
+    
+    // 创建消息元素
+    const messageElement = document.createElement('div');
+    messageElement.className = `chat-message ${sender}`;
+    messageElement.textContent = content;
+    
+    chatMessagesContainer.appendChild(messageElement);
+    
+    // 添加到消息数组
+    if (sender === 'user' || (sender === 'ai' && content !== '正在思考中...')) {
+        chatMessages.push({
+            sender,
+            content,
+            timestamp: new Date().toISOString()
+        });
+    }
+    
+    // 滚动到底部
+    chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+    
+    return messageElement;
+}
+
+// 保存对话历史
+async function saveChatHistory() {
+    if (!currentChatSession || chatMessages.length === 0) return;
+    
+    const token = localStorage.getItem('authToken');
+    if (!token) return;
+    
+    try {
+        await fetch('/api/chat/save', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                chat_session_id: currentChatSession,
+                messages: chatMessages
+            })
+        });
+    } catch (error) {
+        console.error('保存对话历史失败:', error);
+    }
+}
+
+// 显示聊天历史
+async function showChatHistory() {
+    const token = localStorage.getItem('authToken');
+    if (!token) {
+        alert('请先登录');
+        return;
+    }
+    
+    try {
+        // 获取历史记录
+        const response = await fetch('/api/chat/history', {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            chatHistoryList = data.history;
+            displayChatHistory();
+        } else {
+            alert(data.error || '获取历史记录失败');
+        }
+    } catch (error) {
+        console.error('获取历史记录失败:', error);
+        alert('网络错误，请稍后重试');
+    }
+}
+
+// 显示历史记录模态框
+function displayChatHistory() {
+    const modal = document.getElementById('chatHistoryModal');
+    const historyList = document.getElementById('chatHistoryList');
+    
+    if (chatHistoryList.length === 0) {
+        historyList.innerHTML = '<div class="loading-message">暂无历史记录</div>';
+    } else {
+        historyList.innerHTML = '';
+        
+        chatHistoryList.forEach((history, index) => {
+            const historyItem = document.createElement('div');
+            historyItem.className = 'history-item';
+            
+            const date = new Date(history.updated_at).toLocaleString('zh-CN');
+            const previewMessages = history.messages.slice(0, 3); // 只显示前3条消息预览
+            
+            historyItem.innerHTML = `
+                <div class="history-header">
+                    <div class="history-date">对话时间: ${date}</div>
+                    <div class="history-actions">
+                        <button class="history-btn load" onclick="loadChatHistory(${index})">
+                            <i class="fas fa-comment-dots"></i> 加载
+                        </button>
+                        <button class="history-btn delete" onclick="deleteChatHistory(${history.id}, ${index})">
+                            <i class="fas fa-trash"></i> 删除
+                        </button>
+                    </div>
+                </div>
+                <div class="history-preview">
+                    <div class="history-messages">
+                        ${previewMessages.map(msg => `
+                            <div class="preview-message ${msg.sender}">
+                                <strong>${msg.sender === 'user' ? '我' : 'AI'}:</strong> 
+                                ${msg.content.substring(0, 100)}${msg.content.length > 100 ? '...' : ''}
+                            </div>
+                        `).join('')}
+                        ${history.messages.length > 3 ? `<div class="preview-message">...还有 ${history.messages.length - 3} 条消息</div>` : ''}
+                    </div>
+                </div>
+            `;
+            
+            historyList.appendChild(historyItem);
+        });
+    }
+    
+    modal.style.display = 'flex';
+}
+
+// 加载历史对话
+function loadChatHistory(index) {
+    const history = chatHistoryList[index];
+    if (!history) return;
+    
+    // 保存当前对话
+    if (currentChatSession && chatMessages.length > 0) {
+        saveChatHistory();
+    }
+    
+    // 加载历史对话
+    currentChatSession = history.chat_session_id;
+    chatMessages = [...history.messages];
+    
+    // 显示历史消息
+    const chatMessagesContainer = document.getElementById('chatMessages');
+    chatMessagesContainer.innerHTML = '';
+    
+    history.messages.forEach(msg => {
+        const messageElement = document.createElement('div');
+        messageElement.className = `chat-message ${msg.sender}`;
+        messageElement.textContent = msg.content;
+        chatMessagesContainer.appendChild(messageElement);
+    });
+    
+    // 滚动到底部
+    chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+    
+    // 关闭历史记录模态框
+    closeChatHistoryModal();
+    
+    // 确保对话面板打开
+    const chatPanel = document.getElementById('aiChatPanel');
+    if (!chatPanel.classList.contains('open')) {
+        chatPanel.classList.add('open');
+    }
+}
+
+// 删除历史对话
+async function deleteChatHistory(historyId, index) {
+    if (!confirm('确定要删除这条对话记录吗？')) return;
+    
+    const token = localStorage.getItem('authToken');
+    if (!token) return;
+    
+    try {
+        const response = await fetch(`/api/chat/history/${historyId}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            // 从列表中移除
+            chatHistoryList.splice(index, 1);
+            displayChatHistory();
+        } else {
+            const data = await response.json();
+            alert(data.error || '删除失败');
+        }
+    } catch (error) {
+        console.error('删除历史记录失败:', error);
+        alert('网络错误，请稍后重试');
+    }
+}
+
+// 清空所有历史记录
+async function clearAllChatHistory() {
+    if (!confirm('确定要清空所有对话记录吗？此操作不可恢复！')) return;
+    
+    const token = localStorage.getItem('authToken');
+    if (!token) return;
+    
+    try {
+        const response = await fetch('/api/chat/history', {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            chatHistoryList = [];
+            displayChatHistory();
+        } else {
+            const data = await response.json();
+            alert(data.error || '清空失败');
+        }
+    } catch (error) {
+        console.error('清空历史记录失败:', error);
+        alert('网络错误，请稍后重试');
+    }
+}
+
+// 关闭历史记录模态框
+function closeChatHistoryModal() {
+    const modal = document.getElementById('chatHistoryModal');
+    modal.style.display = 'none';
+}
+
+// 设置聊天输入框功能
+function setupChatInput() {
+    const chatInput = document.getElementById('chatInput');
+    const sendBtn = document.querySelector('.send-btn');
+    
+    if (!chatInput || !sendBtn) return;
+    
+    // 监听输入变化
+    chatInput.addEventListener('input', function() {
+        const hasContent = this.value.trim().length > 0;
+        sendBtn.disabled = !hasContent;
+        
+        // 自动调整高度
+        this.style.height = 'auto';
+        this.style.height = Math.min(this.scrollHeight, 100) + 'px';
+    });
+    
+    // 监听按键
+    chatInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            if (!sendBtn.disabled) {
+                sendChatMessage();
+            }
+        }
+    });
+    
+    // 初始状态
+    sendBtn.disabled = true;
+}
+
+// 设置对话面板拖拽功能
+function setupChatPanelDrag() {
+    const chatPanel = document.getElementById('aiChatPanel');
+    const header = document.getElementById('aiChatPanelHeader');
+    
+    if (!chatPanel || !header) return;
+    
+    let isDragging = false;
+    let startX, startY, startLeft, startTop;
+    
+    header.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        
+        const rect = chatPanel.getBoundingClientRect();
+        startLeft = rect.left;
+        startTop = rect.top;
+        
+        chatPanel.style.position = 'fixed';
+        chatPanel.style.left = startLeft + 'px';
+        chatPanel.style.top = startTop + 'px';
+        chatPanel.style.right = 'auto';
+        
+        e.preventDefault();
+    });
+    
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        
+        const deltaX = e.clientX - startX;
+        const deltaY = e.clientY - startY;
+        
+        chatPanel.style.left = (startLeft + deltaX) + 'px';
+        chatPanel.style.top = (startTop + deltaY) + 'px';
+    });
+    
+    document.addEventListener('mouseup', () => {
+        isDragging = false;
+    });
+}
+
+// 设置对话面板大小调整功能
+function setupChatPanelResize() {
+    const chatPanel = document.getElementById('aiChatPanel');
+    const handle = chatPanel.querySelector('.resize-handle');
+    
+    if (!handle) return;
+    
+    let isResizing = false;
+    let startX, startY, startWidth, startHeight;
+    
+    handle.addEventListener('mousedown', (e) => {
+        isResizing = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        startWidth = chatPanel.offsetWidth;
+        startHeight = chatPanel.offsetHeight;
+        chatPanel.style.transition = 'none';
+        e.preventDefault();
+    });
+    
+    document.addEventListener('mousemove', (e) => {
+        if (!isResizing) return;
+        
+        // 右下角resize-handle：向右拖拽增加宽度，向下拖拽增加高度
+        const width = startWidth + (e.clientX - startX);
+        const height = startHeight + (e.clientY - startY);
+        
+        chatPanel.style.width = Math.max(300, Math.min(800, width)) + 'px';
+        chatPanel.style.height = Math.max(400, Math.min(window.innerHeight - 100, height)) + 'px';
+    });
+    
+    document.addEventListener('mouseup', () => {
+        if (isResizing) {
+            chatPanel.style.transition = '';
+            isResizing = false;
+        }
+    });
+}
