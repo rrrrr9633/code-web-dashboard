@@ -946,6 +946,150 @@ app.get('/api/projects/:id/search', requireAuth, (req, res) => {
     }
 });
 
+// 保存文件内容 - 更新数据库中的文件
+app.put('/api/projects/:id/files/*', requireAuth, (req, res) => {
+    try {
+        const projectId = req.params.id;
+        const filePath = req.params[0];
+        const { content } = req.body;
+        
+        if (!content && content !== '') {
+            return res.status(400).json({ error: '文件内容不能为空' });
+        }
+        
+        console.log(`保存文件请求: 项目=${projectId}, 路径=${filePath}`);
+        
+        // 验证项目是否属于当前用户
+        db.get("SELECT id FROM projects WHERE id = ? AND user_id = ?", [projectId, req.user.id], (err, project) => {
+            if (err) {
+                console.error('验证项目失败:', err);
+                return res.status(500).json({ error: '验证项目失败' });
+            }
+            
+            if (!project) {
+                return res.status(404).json({ error: '项目不存在或无权限访问' });
+            }
+            
+            // 首先尝试直接匹配路径
+            db.get(
+                "SELECT id FROM project_files WHERE project_id = ? AND file_path = ?",
+                [projectId, filePath],
+                (err, row) => {
+                    if (err) {
+                        console.error('查询文件失败:', err);
+                        return res.status(500).json({ error: '查询文件失败' });
+                    }
+                    
+                    if (row) {
+                        // 文件存在，更新内容
+                        updateFileContent(projectId, filePath, content, res);
+                    } else {
+                        // 如果直接匹配没找到，尝试模糊匹配
+                        db.get(
+                            "SELECT file_path FROM project_files WHERE project_id = ? AND file_path LIKE ?",
+                            [projectId, `%/${filePath}`],
+                            (err, row) => {
+                                if (err) {
+                                    console.error('模糊匹配文件失败:', err);
+                                    return res.status(500).json({ error: '查询文件失败' });
+                                }
+                                
+                                if (row) {
+                                    // 使用找到的完整路径更新
+                                    updateFileContent(projectId, row.file_path, content, res);
+                                } else {
+                                    return res.status(404).json({ error: '文件不存在' });
+                                }
+                            }
+                        );
+                    }
+                }
+            );
+        });
+    } catch (error) {
+        console.error('保存文件失败:', error);
+        res.status(500).json({ error: '保存文件失败' });
+    }
+});
+
+// 辅助函数：更新文件内容
+function updateFileContent(projectId, filePath, content, res) {
+    const newSize = Buffer.byteLength(content, 'utf8');
+    const lastModified = Date.now();
+    
+    db.run(
+        `UPDATE project_files 
+         SET content = ?, size = ?, last_modified = ? 
+         WHERE project_id = ? AND file_path = ?`,
+        [content, newSize, lastModified, projectId, filePath],
+        function(err) {
+            if (err) {
+                console.error('更新文件内容失败:', err);
+                return res.status(500).json({ error: '更新文件内容失败' });
+            }
+            
+            if (this.changes === 0) {
+                return res.status(404).json({ error: '文件不存在' });
+            }
+            
+            console.log(`文件已更新: ${filePath}`);
+            res.json({ 
+                success: true, 
+                message: '文件保存成功',
+                path: filePath,
+                size: newSize,
+                lastModified: lastModified
+            });
+        }
+    );
+}
+
+// 下载整个项目 - 打包为zip文件
+app.get('/api/projects/:id/download', requireAuth, (req, res) => {
+    try {
+        const projectId = req.params.id;
+        
+        // 验证项目是否属于当前用户
+        db.get("SELECT name FROM projects WHERE id = ? AND user_id = ?", [projectId, req.user.id], (err, project) => {
+            if (err) {
+                console.error('验证项目失败:', err);
+                return res.status(500).json({ error: '验证项目失败' });
+            }
+            
+            if (!project) {
+                return res.status(404).json({ error: '项目不存在或无权限访问' });
+            }
+            
+            // 获取项目所有文件
+            db.all(
+                "SELECT file_path, content FROM project_files WHERE project_id = ?",
+                [projectId],
+                (err, files) => {
+                    if (err) {
+                        console.error('获取项目文件失败:', err);
+                        return res.status(500).json({ error: '获取项目文件失败' });
+                    }
+                    
+                    // 创建文件映射对象，前端可以用来创建zip
+                    const fileMap = {};
+                    files.forEach(file => {
+                        fileMap[file.file_path] = file.content;
+                    });
+                    
+                    res.json({
+                        projectName: project.name,
+                        files: fileMap,
+                        totalFiles: files.length
+                    });
+                }
+            );
+        });
+    } catch (error) {
+        console.error('下载项目失败:', error);
+        res.status(500).json({ error: '下载项目失败' });
+    }
+});
+
 // 移除项目 - 从数据库删除
 app.delete('/api/projects/:id', requireAuth, (req, res) => {
     try {

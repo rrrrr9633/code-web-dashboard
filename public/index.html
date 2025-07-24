@@ -6,6 +6,7 @@
     <title>代码可视化分析器</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -1446,6 +1447,7 @@
             margin-bottom: 25px;
             border-radius: 0 12px 12px 0;
             box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            position: relative;
         }
 
         .file-info h3 {
@@ -1457,6 +1459,98 @@
         .file-info p {
             color: #424242;
             margin: 6px 0;
+        }
+
+        .file-actions {
+            position: absolute;
+            top: 20px;
+            right: 25px;
+            display: flex;
+            gap: 10px;
+        }
+
+        .action-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .edit-btn {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .edit-btn:hover {
+            background: #45a049;
+            transform: translateY(-2px);
+        }
+
+        .save-btn {
+            background: #2196F3;
+            color: white;
+        }
+
+        .save-btn:hover {
+            background: #1976D2;
+            transform: translateY(-2px);
+        }
+
+        .cancel-btn {
+            background: #f44336;
+            color: white;
+        }
+
+        .cancel-btn:hover {
+            background: #d32f2f;
+            transform: translateY(-2px);
+        }
+
+        .download-btn {
+            background: #FF9800;
+            color: white;
+        }
+
+        .download-btn:hover {
+            background: #F57C00;
+            transform: translateY(-2px);
+        }
+
+        /* 代码编辑器样式 */
+        .code-editor {
+            width: 100%;
+            min-height: 400px;
+            padding: 20px;
+            border: 2px solid #e9ecef;
+            border-radius: 12px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            background: #f8f9fa;
+            color: #333;
+            resize: vertical;
+            outline: none;
+            box-shadow: 0 6px 25px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+        }
+
+        .code-editor:focus {
+            border-color: #2196F3;
+            box-shadow: 0 6px 25px rgba(33, 150, 243, 0.3);
+        }
+
+        .edit-mode-view {
+            margin-top: 10px;
+        }
+
+        .read-only-view {
+            margin-top: 10px;
         }
 
         pre {

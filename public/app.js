@@ -211,6 +211,9 @@ function renderProjectList() {
                 <button class="project-action-btn" onclick="event.stopPropagation(); refreshProject('${project.id}')" title="刷新">
                     <i class="fas fa-sync"></i>
                 </button>
+                <button class="project-action-btn" onclick="event.stopPropagation(); downloadProject('${project.id}')" title="下载项目">
+                    <i class="fas fa-download"></i>
+                </button>
                 <button class="project-action-btn" onclick="event.stopPropagation(); renameProject('${project.id}')" title="重命名">
                     <i class="fas fa-edit"></i>
                 </button>
@@ -813,21 +816,424 @@ function renderFileContent(fileData) {
             <p><strong>路径:</strong> ${fileData.path}</p>
             <p><strong>大小:</strong> ${formatFileSize(fileData.size)}</p>
             <p><strong>修改时间:</strong> ${new Date(fileData.modified).toLocaleString('zh-CN')}</p>
+            <div class="sync-status" style="margin: 10px 0; padding: 8px 12px; background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 6px; font-size: 0.9em; color: #856404;">
+                <i class="fas fa-exclamation-triangle"></i>
+                <strong>提醒：</strong>修改仅保存到服务器，如需同步到本地请使用下载功能
+            </div>
+            <div class="file-actions">
+                <button class="action-btn edit-btn" onclick="toggleEditMode()" title="编辑文件">
+                    <i class="fas fa-edit"></i> 编辑
+                </button>
+                <button class="action-btn save-btn" onclick="saveFile()" title="保存文件 (Ctrl+S)" style="display: none;">
+                    <i class="fas fa-save"></i> 保存
+                </button>
+                <button class="action-btn cancel-btn" onclick="cancelEdit()" title="取消编辑" style="display: none;">
+                    <i class="fas fa-times"></i> 取消
+                </button>
+                <button class="action-btn download-btn" onclick="downloadCurrentFile()" title="下载当前文件">
+                    <i class="fas fa-download"></i> 下载
+                </button>
+            </div>
         </div>
     `;
 
-    // 代码内容
+    // 创建编辑器容器
     const language = getLanguageFromExtension(fileData.extension);
     const highlightedCode = hljs.highlightAuto(fileData.content, [language]).value;
     
     const codeContent = `
         <div class="code-container">
             ${fileInfo}
-            <pre><code class="language-${language}">${highlightedCode}</code></pre>
+            <!-- 只读模式 -->
+            <div id="readOnlyView" class="read-only-view">
+                <pre><code class="language-${language}">${highlightedCode}</code></pre>
+            </div>
+            <!-- 编辑模式 -->
+            <div id="editModeView" class="edit-mode-view" style="display: none;">
+                <textarea id="codeEditor" class="code-editor">${fileData.content}</textarea>
+            </div>
         </div>
     `;
 
     codeContainer.innerHTML = codeContent;
+    
+    // 设置编辑器样式和快捷键
+    setupCodeEditor();
+}
+
+// 下载当前文件
+function downloadCurrentFile() {
+    if (!currentFile || !currentFileContent) {
+        showNotification('没有可下载的文件', 'warning');
+        return;
+    }
+    
+    const fileName = currentFile.split('/').pop();
+    const blob = new Blob([currentFileContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    showNotification(`文件 "${fileName}" 下载成功！`, 'success');
+}
+
+// 设置代码编辑器
+function setupCodeEditor() {
+    const editor = document.getElementById('codeEditor');
+    if (!editor) return;
+    
+    // 设置编辑器基本属性
+    editor.style.fontFamily = 'Monaco, Menlo, "Ubuntu Mono", Consolas, monospace';
+    editor.style.fontSize = '14px';
+    editor.style.lineHeight = '1.5';
+    editor.style.tabSize = '4';
+    
+    // 添加Tab键支持
+    editor.addEventListener('keydown', function(e) {
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            const start = this.selectionStart;
+            const end = this.selectionEnd;
+            
+            // 插入制表符
+            this.value = this.value.substring(0, start) + '\t' + this.value.substring(end);
+            this.selectionStart = this.selectionEnd = start + 1;
+        }
+        
+        // Ctrl+S 保存
+        if (e.ctrlKey && e.key === 's') {
+            e.preventDefault();
+            saveFile();
+        }
+        
+        // Esc 取消编辑
+        if (e.key === 'Escape') {
+            cancelEdit();
+        }
+    });
+    
+    // 自动调整高度
+    editor.addEventListener('input', function() {
+        this.style.height = 'auto';
+        this.style.height = this.scrollHeight + 'px';
+    });
+}
+
+// 切换编辑模式
+function toggleEditMode() {
+    const readOnlyView = document.getElementById('readOnlyView');
+    const editModeView = document.getElementById('editModeView');
+    const editBtn = document.querySelector('.edit-btn');
+    const saveBtn = document.querySelector('.save-btn');
+    const cancelBtn = document.querySelector('.cancel-btn');
+    const editor = document.getElementById('codeEditor');
+    
+    if (!editModeView || !readOnlyView) return;
+    
+    // 切换到编辑模式
+    readOnlyView.style.display = 'none';
+    editModeView.style.display = 'block';
+    
+    // 切换按钮显示
+    editBtn.style.display = 'none';
+    saveBtn.style.display = 'inline-block';
+    cancelBtn.style.display = 'inline-block';
+    
+    // 设置编辑器高度并聚焦
+    if (editor) {
+        editor.style.height = 'auto';
+        editor.style.height = editor.scrollHeight + 'px';
+        editor.focus();
+        
+        // 将光标移到文件开头
+        editor.setSelectionRange(0, 0);
+    }
+    
+    showNotification('进入编辑模式，按Ctrl+S保存，按Esc取消', 'info');
+}
+
+// 保存文件
+async function saveFile() {
+    const editor = document.getElementById('codeEditor');
+    if (!editor || !currentFile || !currentProject) {
+        showNotification('无法保存：缺少必要信息', 'error');
+        return;
+    }
+    
+    const newContent = editor.value;
+    
+    // 如果内容没有变化，直接返回
+    if (newContent === currentFileContent) {
+        showNotification('文件内容未发生变化', 'info');
+        return;
+    }
+    
+    try {
+        showNotification('正在保存文件...', 'info');
+        
+        const sessionToken = localStorage.getItem('authToken');
+        // 正确处理文件路径，将每个路径段分别编码
+        const pathSegments = currentFile.split('/').map(segment => encodeURIComponent(segment));
+        const encodedPath = pathSegments.join('/');
+        
+        const response = await fetch(`/api/projects/${currentProject.id}/files/${encodedPath}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${sessionToken}`
+            },
+            body: JSON.stringify({ content: newContent })
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            // 更新当前文件内容
+            currentFileContent = newContent;
+            
+            // 更新文件信息显示
+            updateFileInfo(result);
+            
+            // 退出编辑模式
+            exitEditMode();
+            
+            showNotification('文件保存成功！', 'success');
+            
+            // 显示本地同步选项
+            showLocalSyncOptions(newContent);
+            
+        } else {
+            throw new Error(result.error || '保存失败');
+        }
+        
+    } catch (error) {
+        console.error('保存文件失败:', error);
+        showNotification('保存文件失败: ' + error.message, 'error');
+    }
+}
+
+// 显示本地同步选项
+function showLocalSyncOptions(content) {
+    // 创建同步选项面板
+    const syncPanel = document.createElement('div');
+    syncPanel.className = 'sync-panel';
+    syncPanel.style.cssText = `
+        position: fixed;
+        top: 80px;
+        right: 20px;
+        background: white;
+        border: 1px solid #e1e8ed;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        padding: 15px;
+        z-index: 10000;
+        min-width: 220px;
+        max-width: 280px;
+    `;
+    
+    const fileName = currentFile.split('/').pop();
+    
+    syncPanel.innerHTML = `
+        <div style="margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #eee;">
+            <div style="font-weight: bold; color: #333; font-size: 0.9em;">
+                <i class="fas fa-sync-alt" style="margin-right: 6px; color: #1a73e8;"></i>
+                同步到本地
+            </div>
+        </div>
+        
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+            <button class="sync-option-btn" onclick="downloadSingleFile()" 
+                    style="display: flex; align-items: center; padding: 10px 12px; border: 1px solid #1a73e8; border-radius: 6px; background: #f8f9ff; color: #1a73e8; cursor: pointer; font-size: 0.85em; transition: all 0.2s ease;">
+                <i class="fas fa-download" style="margin-right: 8px; width: 14px;"></i>
+                <span>下载文件</span>
+            </button>
+            
+            <button class="sync-option-btn" onclick="downloadFullProject()" 
+                    style="display: flex; align-items: center; padding: 10px 12px; border: 1px solid #27ae60; border-radius: 6px; background: #f8fff8; color: #27ae60; cursor: pointer; font-size: 0.85em; transition: all 0.2s ease;">
+                <i class="fas fa-archive" style="margin-right: 8px; width: 14px;"></i>
+                <span>下载项目</span>
+            </button>
+            
+            <button class="sync-option-btn" onclick="showSyncInstructions()" 
+                    style="display: flex; align-items: center; padding: 10px 12px; border: 1px solid #f39c12; border-radius: 6px; background: #fffbf0; color: #f39c12; cursor: pointer; font-size: 0.85em; transition: all 0.2s ease;">
+                <i class="fas fa-info-circle" style="margin-right: 8px; width: 14px;"></i>
+                <span>同步说明</span>
+            </button>
+        </div>
+        
+        <div style="text-align: center; margin-top: 12px; padding-top: 8px; border-top: 1px solid #eee;">
+            <button onclick="closeSyncPanel()" 
+                    style="padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; background: white; color: #666; cursor: pointer; font-size: 0.8em; transition: all 0.2s ease;">
+                <i class="fas fa-times" style="margin-right: 4px;"></i> 关闭
+            </button>
+        </div>
+    `;
+    
+    document.body.appendChild(syncPanel);
+    
+    // 为按钮添加悬停效果
+    const buttons = syncPanel.querySelectorAll('.sync-option-btn');
+    buttons.forEach(btn => {
+        btn.addEventListener('mouseenter', function() {
+            this.style.transform = 'translateY(-1px)';
+            this.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+        });
+        btn.addEventListener('mouseleave', function() {
+            this.style.transform = 'translateY(0)';
+            this.style.boxShadow = 'none';
+        });
+    });
+    
+    // 添加全局closeSyncPanel函数
+    window.closeSyncPanel = function() {
+        if (syncPanel.parentNode) {
+            syncPanel.parentNode.removeChild(syncPanel);
+        }
+        // 清理全局函数
+        delete window.closeSyncPanel;
+        delete window.downloadSingleFile;
+        delete window.downloadFullProject;
+        delete window.showSyncInstructions;
+    };
+    
+    // 添加下载单个文件函数
+    window.downloadSingleFile = function() {
+        if (!currentFile || !currentFileContent) {
+            showNotification('没有可下载的文件内容', 'warning');
+            closeSyncPanel();
+            return;
+        }
+        
+        const fileName = currentFile.split('/').pop();
+        const blob = new Blob([currentFileContent], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        showNotification(`文件 "${fileName}" 下载成功！`, 'success');
+        closeSyncPanel();
+    };
+    
+    // 添加下载完整项目函数
+    window.downloadFullProject = function() {
+        if (currentProject) {
+            downloadProject(currentProject.id);
+            closeSyncPanel();
+        }
+    };
+    
+    // 添加显示同步说明函数
+    window.showSyncInstructions = function() {
+        closeSyncPanel();
+        showSyncInstructionsModal();
+    };
+    
+    // 5秒后自动淡化提示
+    setTimeout(() => {
+        syncPanel.style.opacity = '0.8';
+        syncPanel.style.transform = 'scale(0.98)';
+    }, 5000);
+    
+    // 10秒后自动关闭
+    setTimeout(() => {
+        if (syncPanel.parentNode) {
+            closeSyncPanel();
+        }
+    }, 10000);
+}
+
+// 更新本地文件（保留原有函数但增强功能）
+async function updateLocalFile(content) {
+    // 检查是否是本地项目且有文件访问权限
+    if (!currentProject || !currentProject.path || !currentProject.path.startsWith('[本地]')) {
+        return;
+    }
+    
+    try {
+        // 从localStorage获取本地项目的handle信息
+        const localProjectData = localStorage.getItem(`localProject_${currentProject.id}`);
+        if (!localProjectData) {
+            console.log('没有找到本地项目数据');
+            return;
+        }
+        
+        // 注意：由于浏览器安全限制，我们无法直接写入本地文件
+        // 这里我们提供下载功能作为替代方案
+        showNotification('检测到本地项目，建议下载文件到本地更新', 'info');
+        
+        // 自动触发下载
+        downloadSingleFile();
+        
+    } catch (error) {
+        console.error('更新本地文件失败:', error);
+    }
+}
+
+// 更新文件信息显示
+function updateFileInfo(fileInfo) {
+    const fileInfoDiv = document.querySelector('.file-info');
+    if (!fileInfoDiv) return;
+    
+    const sizeElement = fileInfoDiv.querySelector('p:nth-child(3)');
+    const timeElement = fileInfoDiv.querySelector('p:nth-child(4)');
+    
+    if (sizeElement) {
+        sizeElement.innerHTML = `<strong>大小:</strong> ${formatFileSize(fileInfo.size)}`;
+    }
+    
+    if (timeElement) {
+        timeElement.innerHTML = `<strong>修改时间:</strong> ${new Date(fileInfo.lastModified).toLocaleString('zh-CN')}`;
+    }
+}
+
+// 取消编辑
+function cancelEdit() {
+    const editor = document.getElementById('codeEditor');
+    if (editor) {
+        // 恢复原始内容
+        editor.value = currentFileContent;
+    }
+    
+    exitEditMode();
+    showNotification('已取消编辑', 'info');
+}
+
+// 退出编辑模式
+function exitEditMode() {
+    const readOnlyView = document.getElementById('readOnlyView');
+    const editModeView = document.getElementById('editModeView');
+    const editBtn = document.querySelector('.edit-btn');
+    const saveBtn = document.querySelector('.save-btn');
+    const cancelBtn = document.querySelector('.cancel-btn');
+    
+    if (!editModeView || !readOnlyView) return;
+    
+    // 切换到只读模式
+    editModeView.style.display = 'none';
+    readOnlyView.style.display = 'block';
+    
+    // 切换按钮显示
+    editBtn.style.display = 'inline-block';
+    saveBtn.style.display = 'none';
+    cancelBtn.style.display = 'none';
+    
+    // 重新高亮显示代码
+    const language = getLanguageFromExtension(getFileExtension(currentFile));
+    const highlightedCode = hljs.highlightAuto(currentFileContent, [language]).value;
+    const codeElement = readOnlyView.querySelector('code');
+    if (codeElement) {
+        codeElement.innerHTML = highlightedCode;
+    }
 }
 
 // 根据文件扩展名获取语言
@@ -1516,6 +1922,354 @@ async function removeProject(projectId) {
         console.error('移除项目失败:', error);
         showNotification('移除项目失败: ' + error.message, 'error');
     }
+}
+
+// 下载项目到本地
+async function downloadProject(projectId) {
+    try {
+        const project = projects.find(p => p.id === projectId);
+        if (!project) {
+            showNotification('项目不存在', 'error');
+            return;
+        }
+        
+        showNotification('正在准备下载项目...', 'info');
+        
+        const sessionToken = localStorage.getItem('authToken');
+        const response = await fetch(`/api/projects/${projectId}/download`, {
+            headers: {
+                'Authorization': `Bearer ${sessionToken}`
+            }
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || '下载失败');
+        }
+        
+        const projectData = await response.json();
+        
+        // 使用JSZip创建zip文件
+        if (typeof JSZip !== 'undefined') {
+            const zip = new JSZip();
+            
+            // 添加所有文件到zip
+            Object.entries(projectData.files).forEach(([filePath, content]) => {
+                zip.file(filePath, content);
+            });
+            
+            // 生成zip文件并下载
+            const blob = await zip.generateAsync({ type: 'blob' });
+            
+            // 创建下载链接
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${projectData.projectName}.zip`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            showNotification(`项目 "${projectData.projectName}" 下载成功！包含 ${projectData.totalFiles} 个文件`, 'success');
+        } else {
+            // 如果没有JSZip，创建一个包含所有文件的文本文件
+            let allContent = `项目: ${projectData.projectName}\n`;
+            allContent += `文件数量: ${projectData.totalFiles}\n`;
+            allContent += '='.repeat(50) + '\n\n';
+            
+            Object.entries(projectData.files).forEach(([filePath, content]) => {
+                allContent += `文件: ${filePath}\n`;
+                allContent += '-'.repeat(30) + '\n';
+                allContent += content + '\n\n';
+            });
+            
+            // 下载为文本文件
+            const blob = new Blob([allContent], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${projectData.projectName}_export.txt`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            showNotification(`项目 "${projectData.projectName}" 已导出为文本文件`, 'success');
+        }
+        
+    } catch (error) {
+        console.error('下载项目失败:', error);
+        showNotification('下载项目失败: ' + error.message, 'error');
+    }
+}
+
+// 显示同步说明模态框
+function showSyncInstructionsModal() {
+    const modal = document.createElement('div');
+    modal.className = 'sync-instructions-modal';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 10001;
+    `;
+    
+    const modalContent = document.createElement('div');
+    modalContent.style.cssText = `
+        background: white;
+        border-radius: 12px;
+        padding: 30px;
+        max-width: 600px;
+        max-height: 80vh;
+        overflow-y: auto;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    `;
+    
+    modalContent.innerHTML = `
+        <div style="text-align: center; margin-bottom: 25px;">
+            <h2 style="color: #1a73e8; margin: 0 0 10px 0;">
+                <i class="fas fa-sync-alt"></i> 本地文件同步指南
+            </h2>
+            <p style="color: #666; margin: 0;">了解如何保持服务器修改与本地文件的同步</p>
+        </div>
+        
+        <div style="margin-bottom: 25px;">
+            <h3 style="color: #e74c3c; margin-bottom: 10px;">
+                <i class="fas fa-exclamation-triangle"></i> 重要说明
+            </h3>
+            <div style="background: #fff5f5; border: 1px solid #fed7d7; border-radius: 8px; padding: 15px;">
+                <p style="margin: 0; color: #c53030;">
+                    由于浏览器安全限制，在线编辑器无法直接修改您本地的文件。
+                    编辑操作只会更新服务器数据库中的副本。
+                </p>
+            </div>
+        </div>
+        
+        <div style="margin-bottom: 25px;">
+            <h3 style="color: #27ae60; margin-bottom: 15px;">
+                <i class="fas fa-lightbulb"></i> 推荐同步方案
+            </h3>
+            
+            <div style="margin-bottom: 15px;">
+                <div style="background: #f0f8ff; border: 1px solid #bee5eb; border-radius: 8px; padding: 15px;">
+                    <h4 style="color: #1a73e8; margin: 0 0 10px 0;">
+                        <i class="fas fa-download"></i> 方案一：下载更新的文件
+                    </h4>
+                    <ul style="margin: 0; padding-left: 20px; color: #666;">
+                        <li>每次保存后，使用"下载单个文件"获取最新版本</li>
+                        <li>手动替换本地对应的文件</li>
+                        <li>适合：偶尔修改几个文件的情况</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div style="margin-bottom: 15px;">
+                <div style="background: #f0fff4; border: 1px solid #c6f6d5; border-radius: 8px; padding: 15px;">
+                    <h4 style="color: #27ae60; margin: 0 0 10px 0;">
+                        <i class="fas fa-archive"></i> 方案二：下载完整项目
+                    </h4>
+                    <ul style="margin: 0; padding-left: 20px; color: #666;">
+                        <li>定期下载整个项目的ZIP包</li>
+                        <li>解压到本地，覆盖原有文件</li>
+                        <li>适合：大量修改或定期同步的情况</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div style="margin-bottom: 15px;">
+                <div style="background: #fffbf0; border: 1px solid #f7e6a4; border-radius: 8px; padding: 15px;">
+                    <h4 style="color: #f39c12; margin: 0 0 10px 0;">
+                        <i class="fas fa-code-branch"></i> 方案三：使用版本控制（推荐）
+                    </h4>
+                    <ul style="margin: 0; padding-left: 20px; color: #666;">
+                        <li>下载项目后，使用Git等版本控制工具</li>
+                        <li>可以跟踪所有修改历史</li>
+                        <li>支持多人协作和版本回退</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        
+        <div style="margin-bottom: 25px;">
+            <h3 style="color: #6f42c1; margin-bottom: 15px;">
+                <i class="fas fa-magic"></i> 快捷操作
+            </h3>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <button onclick="downloadCurrentProject()" 
+                        style="flex: 1; min-width: 140px; padding: 12px; border: 1px solid #27ae60; border-radius: 8px; background: #27ae60; color: white; cursor: pointer;">
+                    <i class="fas fa-download"></i> 下载当前项目
+                </button>
+                <button onclick="showBatchDownloadOptions()" 
+                        style="flex: 1; min-width: 140px; padding: 12px; border: 1px solid #1a73e8; border-radius: 8px; background: #1a73e8; color: white; cursor: pointer;">
+                    <i class="fas fa-list"></i> 批量下载选项
+                </button>
+            </div>
+        </div>
+        
+        <div style="text-align: center; padding-top: 20px; border-top: 1px solid #eee;">
+            <button onclick="closeSyncInstructionsModal()" 
+                    style="padding: 12px 24px; border: 1px solid #ddd; border-radius: 8px; background: white; color: #666; cursor: pointer;">
+                <i class="fas fa-times"></i> 关闭
+            </button>
+        </div>
+    `;
+    
+    modal.appendChild(modalContent);
+    document.body.appendChild(modal);
+    
+    // 添加关闭函数
+    window.closeSyncInstructionsModal = function() {
+        if (modal.parentNode) {
+            modal.parentNode.removeChild(modal);
+        }
+        delete window.closeSyncInstructionsModal;
+        delete window.downloadCurrentProject;
+        delete window.showBatchDownloadOptions;
+    };
+    
+    // 下载当前项目
+    window.downloadCurrentProject = function() {
+        if (currentProject) {
+            downloadProject(currentProject.id);
+            closeSyncInstructionsModal();
+        }
+    };
+    
+    // 显示批量下载选项
+    window.showBatchDownloadOptions = function() {
+        closeSyncInstructionsModal();
+        showBatchDownloadModal();
+    };
+    
+    // 点击背景关闭
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) {
+            closeSyncInstructionsModal();
+        }
+    });
+}
+
+// 显示批量下载模态框
+function showBatchDownloadModal() {
+    const modal = document.createElement('div');
+    modal.className = 'batch-download-modal';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 10001;
+    `;
+    
+    const modalContent = document.createElement('div');
+    modalContent.style.cssText = `
+        background: white;
+        border-radius: 12px;
+        padding: 30px;
+        max-width: 500px;
+        max-height: 80vh;
+        overflow-y: auto;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    `;
+    
+    const projectList = projects.map(project => `
+        <div style="display: flex; align-items: center; padding: 10px; border: 1px solid #eee; border-radius: 8px; margin-bottom: 8px;">
+            <input type="checkbox" id="project_${project.id}" value="${project.id}" style="margin-right: 12px;">
+            <div style="flex: 1;">
+                <div style="font-weight: bold; color: #333;">${project.name}</div>
+                <div style="font-size: 0.8em; color: #666;">${project.path}</div>
+            </div>
+            <button onclick="downloadProject('${project.id}')" 
+                    style="padding: 6px 12px; border: 1px solid #1a73e8; border-radius: 6px; background: #f8f9ff; color: #1a73e8; cursor: pointer; font-size: 0.8em;">
+                <i class="fas fa-download"></i>
+            </button>
+        </div>
+    `).join('');
+    
+    modalContent.innerHTML = `
+        <div style="text-align: center; margin-bottom: 25px;">
+            <h2 style="color: #1a73e8; margin: 0 0 10px 0;">
+                <i class="fas fa-archive"></i> 批量项目下载
+            </h2>
+            <p style="color: #666; margin: 0;">选择要下载的项目</p>
+        </div>
+        
+        <div style="margin-bottom: 20px;">
+            ${projectList}
+        </div>
+        
+        <div style="display: flex; gap: 10px; justify-content: center; padding-top: 20px; border-top: 1px solid #eee;">
+            <button onclick="selectAllProjects()" 
+                    style="padding: 10px 16px; border: 1px solid #27ae60; border-radius: 6px; background: #f8fff8; color: #27ae60; cursor: pointer;">
+                <i class="fas fa-check-square"></i> 全选
+            </button>
+            <button onclick="downloadSelectedProjects()" 
+                    style="padding: 10px 16px; border: 1px solid #1a73e8; border-radius: 6px; background: #1a73e8; color: white; cursor: pointer;">
+                <i class="fas fa-download"></i> 下载选中
+            </button>
+            <button onclick="closeBatchDownloadModal()" 
+                    style="padding: 10px 16px; border: 1px solid #ddd; border-radius: 6px; background: white; color: #666; cursor: pointer;">
+                <i class="fas fa-times"></i> 关闭
+            </button>
+        </div>
+    `;
+    
+    modal.appendChild(modalContent);
+    document.body.appendChild(modal);
+    
+    // 添加相关函数
+    window.closeBatchDownloadModal = function() {
+        if (modal.parentNode) {
+            modal.parentNode.removeChild(modal);
+        }
+        delete window.closeBatchDownloadModal;
+        delete window.selectAllProjects;
+        delete window.downloadSelectedProjects;
+    };
+    
+    window.selectAllProjects = function() {
+        const checkboxes = modal.querySelectorAll('input[type="checkbox"]');
+        checkboxes.forEach(cb => cb.checked = true);
+    };
+    
+    window.downloadSelectedProjects = function() {
+        const checkboxes = modal.querySelectorAll('input[type="checkbox"]:checked');
+        const selectedIds = Array.from(checkboxes).map(cb => cb.value);
+        
+        if (selectedIds.length === 0) {
+            showNotification('请选择要下载的项目', 'warning');
+            return;
+        }
+        
+        // 依次下载选中的项目
+        selectedIds.forEach((projectId, index) => {
+            setTimeout(() => {
+                downloadProject(projectId);
+            }, index * 1000); // 间隔1秒下载，避免同时下载太多
+        });
+        
+        showNotification(`正在下载 ${selectedIds.length} 个项目...`, 'info');
+        closeBatchDownloadModal();
+    };
+    
+    // 点击背景关闭
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) {
+            closeBatchDownloadModal();
+        }
+    });
 }
 
 // 显示通知
