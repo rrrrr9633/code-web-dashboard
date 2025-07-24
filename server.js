@@ -4441,10 +4441,14 @@ app.delete('/api/chat/history', requireAuth, (req, res) => {
 
 // AI聊天API接口
 app.post('/api/chat', requireAuth, async (req, res) => {
-    const { message } = req.body;
+    const { message, context } = req.body;
     const user_id = req.user.user_id;
 
-    console.log('收到AI聊天请求:', { user_id, message: message?.substring(0, 50) + '...' });
+    console.log('收到AI聊天请求:', { 
+        user_id, 
+        message: message?.substring(0, 50) + '...',
+        hasContext: !!context
+    });
 
     if (!message) {
         return res.status(400).json({ error: '缺少消息内容' });
@@ -4475,6 +4479,98 @@ app.post('/api/chat', requireAuth, async (req, res) => {
             return res.status(400).json({ error: '请先配置AI API设置' });
         }
 
+        // 构建系统提示词
+        let systemPrompt = `你是一个智能代码助手，专门帮助用户分析、创建和修改代码文件。
+
+你的核心能力：
+1. 📁 分析当前打开的文件内容和结构
+2. 🆕 创建新的代码文件（自动选择合适的文件名和位置）
+3. ✏️ 修改现有文件内容（包括直接编辑当前文件）
+4. 💡 提供编程建议、解释和最佳实践
+
+重要指令：
+- 当用户询问"当前是什么文件"、"这是什么文件"、"分析当前文件"等问题时，如果有当前文件上下文，请分析并说明文件类型、主要功能、技术栈等信息。
+- 当用户要求"创建C++文件"、"帮我创建一个HelloWorld"、"生成一个Python脚本"等时，必须使用JSON格式回复。
+- 当用户要求扩展、修改、优化当前文件时（如"扩展当前C++文件让它变成可以计算加减法的计算器"），必须使用modify_file操作，filePath使用当前文件路径。
+- 文件路径应该合理，如：C++文件用 "main.cpp" 或 "hello.cpp"，Python文件用 "main.py"，JavaScript文件用 "index.js" 等。
+
+⚠️ 重要：当需要执行文件操作时（创建、修改文件），必须严格按照以下格式返回纯JSON，不要添加任何其他文字说明：
+
+创建文件格式：
+\`\`\`json
+{
+    "action": "create_file",
+    "filePath": "文件名（如 main.cpp, hello.py）",
+    "content": "完整的文件内容",
+    "message": "我将为您创建一个[文件类型]文件..."
+}
+\`\`\`
+
+修改文件格式：
+\`\`\`json
+{
+    "action": "modify_file", 
+    "filePath": "目标文件路径",
+    "content": "修改后的完整文件内容",
+    "message": "我将对该文件进行以下修改..."
+}
+\`\`\`
+
+分析文件格式：
+\`\`\`json
+{
+    "action": "analyze_file",
+    "message": "详细的文件分析结果"
+}
+\`\`\`
+
+当修改当前文件时，用户会看到一个对比界面，显示原始内容和修改后的内容，可以选择保留修改或撤销。
+
+请始终用中文回答，语气友好专业。`;
+
+        // 添加上下文信息
+        if (context) {
+            systemPrompt += `\n\n📍 当前工作环境：`;
+            
+            if (context.currentProject) {
+                systemPrompt += `\n• 项目：${context.currentProject.name} (ID: ${context.currentProject.id})`;
+                systemPrompt += `\n• 项目路径：${context.currentProject.path}`;
+            } else {
+                systemPrompt += `\n• 项目：未选择项目`;
+            }
+            
+            if (context.currentFile) {
+                systemPrompt += `\n• 当前文件：${context.currentFile}`;
+                
+                // 分析文件类型
+                const fileExt = context.currentFile.split('.').pop().toLowerCase();
+                const fileTypeMap = {
+                    'js': 'JavaScript',
+                    'ts': 'TypeScript', 
+                    'py': 'Python',
+                    'cpp': 'C++',
+                    'c': 'C语言',
+                    'java': 'Java',
+                    'html': 'HTML',
+                    'css': 'CSS',
+                    'json': 'JSON配置文件'
+                };
+                const fileType = fileTypeMap[fileExt] || '代码文件';
+                systemPrompt += `\n• 文件类型：${fileType}`;
+                
+                if (context.currentFileContent) {
+                    const contentLength = context.currentFileContent.length;
+                    const lineCount = context.currentFileContent.split('\n').length;
+                    systemPrompt += `\n• 文件大小：${contentLength} 字符，${lineCount} 行`;
+                    systemPrompt += `\n\n📄 当前文件内容：\n\`\`\`${fileExt}\n${context.currentFileContent}\n\`\`\``;
+                }
+            } else {
+                systemPrompt += `\n• 当前文件：无文件打开`;
+            }
+            
+            systemPrompt += `\n\n💡 提示：当用户询问当前文件时，请基于上述信息进行分析。创建新文件时会保存到当前项目中。`;
+        }
+
         // 调用AI API
         const modelName = getModelForProvider(userAIConfig.ai_api_url);
         console.log('使用模型:', modelName, '提供商URL:', userAIConfig.ai_api_url);
@@ -4484,15 +4580,15 @@ app.post('/api/chat', requireAuth, async (req, res) => {
             messages: [
                 {
                     role: "system",
-                    content: "你是一个友善的AI助手，请用中文回答用户的问题。"
+                    content: systemPrompt
                 },
                 {
                     role: "user",
                     content: message
                 }
             ],
-            temperature: 0.7,
-            max_tokens: 2000
+            temperature: 0.3, // 降低温度让AI响应更准确
+            max_tokens: 3000
         }, {
             headers: {
                 'Authorization': `Bearer ${userAIConfig.ai_api_key}`,
@@ -4501,6 +4597,81 @@ app.post('/api/chat', requireAuth, async (req, res) => {
         });
 
         const aiMessage = aiResponse.data.choices[0].message.content;
+        console.log('AI原始响应:', aiMessage.substring(0, 200) + '...');
+        
+        // 尝试解析JSON响应
+        try {
+            // 先尝试直接解析
+            let jsonResponse = null;
+            
+            console.log('AI原始响应长度:', aiMessage.length);
+            console.log('AI原始响应前500字符:', aiMessage.substring(0, 500));
+            
+            // 检查是否包含JSON格式
+            if (aiMessage.includes('{') && aiMessage.includes('}')) {
+                console.log('检测到响应中包含JSON格式');
+                
+                // 方法1：尝试提取```json代码块中的JSON
+                const jsonCodeBlockMatch = aiMessage.match(/```json\s*([\s\S]*?)\s*```/i);
+                if (jsonCodeBlockMatch) {
+                    console.log('从```json代码块提取到JSON:', jsonCodeBlockMatch[1]);
+                    try {
+                        jsonResponse = JSON.parse(jsonCodeBlockMatch[1]);
+                        console.log('成功解析JSON代码块:', jsonResponse);
+                    } catch (e) {
+                        console.log('JSON代码块解析失败:', e.message);
+                    }
+                }
+                
+                // 方法2：如果方法1失败，尝试提取任何{}包围的JSON
+                if (!jsonResponse) {
+                    const jsonMatch = aiMessage.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                        console.log('提取到的JSON字符串:', jsonMatch[0]);
+                        try {
+                            jsonResponse = JSON.parse(jsonMatch[0]);
+                            console.log('成功解析JSON:', jsonResponse);
+                        } catch (e) {
+                            console.log('JSON解析失败:', e.message);
+                        }
+                    }
+                }
+                
+                // 方法3：如果仍然失败，尝试多个JSON对象匹配
+                if (!jsonResponse) {
+                    const multipleJsonMatches = aiMessage.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g);
+                    if (multipleJsonMatches) {
+                        for (const match of multipleJsonMatches) {
+                            try {
+                                console.log('尝试解析JSON片段:', match);
+                                const parsed = JSON.parse(match);
+                                if (parsed.action) {
+                                    jsonResponse = parsed;
+                                    console.log('找到有效的JSON操作:', jsonResponse);
+                                    break;
+                                }
+                            } catch (e) {
+                                console.log('JSON片段解析失败:', e.message);
+                            }
+                        }
+                    }
+                }
+                
+                if (jsonResponse && jsonResponse.action) {
+                    console.log('返回JSON操作响应:', jsonResponse.action);
+                    res.json(jsonResponse);
+                    return;
+                } else {
+                    console.log('未找到有效的JSON操作响应');
+                }
+            } else {
+                console.log('响应中不包含JSON格式，作为普通消息处理');
+            }
+        } catch (e) {
+            console.log('JSON解析失败，当作普通消息处理:', e.message);
+        }
+        
+        console.log('返回普通文本响应');
         res.json({ message: aiMessage });
 
     } catch (error) {

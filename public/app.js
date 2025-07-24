@@ -6791,7 +6791,14 @@ function startNewChat() {
     chatMessagesContainer.innerHTML = `
         <div class="welcome-message">
             <i class="fas fa-robot"></i>
-            <p>您好！我是您的AI助手，有什么可以帮助您的吗？</p>
+            <p>您好！我是您的AI代码助手，我可以帮助您：</p>
+            <ul style="text-align: left; margin: 10px 0; padding-left: 20px;">
+                <li>📁 分析当前打开的文件</li>
+                <li>🆕 创建新的代码文件</li>
+                <li>✏️ 修改现有文件内容</li>
+                <li>💡 提供编程建议和解释</li>
+            </ul>
+            <p style="font-size: 0.9em; color: #666;">试试对我说"帮我创建一个Hello World的C++文件"！</p>
         </div>
     `;
     
@@ -6828,6 +6835,17 @@ async function sendChatMessage() {
     const loadingMessage = addChatMessage('ai', '正在思考中...');
     
     try {
+        // 收集当前上下文信息
+        const contextInfo = {
+            currentProject: currentProject ? {
+                id: currentProject.id,
+                name: currentProject.name,
+                path: currentProject.path
+            } : null,
+            currentFile: currentFile || null,
+            currentFileContent: currentFileContent || null
+        };
+        
         // 发送到后端API
         const response = await fetch('/api/chat', {
             method: 'POST',
@@ -6835,7 +6853,10 @@ async function sendChatMessage() {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`
             },
-            body: JSON.stringify({ message })
+            body: JSON.stringify({ 
+                message,
+                context: contextInfo
+            })
         });
         
         const data = await response.json();
@@ -6843,9 +6864,15 @@ async function sendChatMessage() {
         console.log('AI聊天响应:', { status: response.status, data });
         
         if (response.ok) {
-            // 移除加载消息并添加AI回复
+            // 移除加载消息
             loadingMessage.remove();
-            addChatMessage('ai', data.message);
+            
+            // 处理AI响应
+            if (data.action) {
+                await handleAIAction(data);
+            } else {
+                addChatMessage('ai', data.message);
+            }
             
             // 保存对话历史
             saveChatHistory();
@@ -6860,6 +6887,626 @@ async function sendChatMessage() {
         // 重新启用发送按钮
         sendBtn.disabled = false;
     }
+}
+
+// 处理AI操作
+async function handleAIAction(actionData) {
+    console.log('处理AI操作:', actionData);
+    
+    switch (actionData.action) {
+        case 'create_file':
+            await handleCreateFileAction(actionData);
+            break;
+        case 'modify_file':
+            await handleModifyFileAction(actionData);
+            break;
+        case 'analyze_file':
+            await handleAnalyzeFileAction(actionData);
+            break;
+        default:
+            addChatMessage('ai', actionData.message || '执行了未知操作');
+    }
+}
+
+// 处理创建文件操作
+async function handleCreateFileAction(actionData) {
+    const { filePath, content, message } = actionData;
+    
+    if (!currentProject) {
+        addChatMessage('ai', '❌ 错误：没有选择项目，无法创建文件。请先选择或创建一个项目。');
+        return;
+    }
+    
+    console.log('准备创建文件:', { filePath, projectId: currentProject.id });
+    
+    // 显示文件预览和确认对话框
+    showFilePreviewDialog('create', filePath, content, message, async () => {
+        try {
+            console.log('开始创建文件:', filePath);
+            addChatMessage('ai', `🔄 正在创建文件 "${filePath}"...`);
+            
+            const sessionToken = localStorage.getItem('authToken');
+            if (!sessionToken) {
+                addChatMessage('ai', '❌ 错误：未登录，请刷新页面重新登录。');
+                return;
+            }
+            
+            const response = await fetch(`/api/projects/${currentProject.id}/files/${encodeURIComponent(filePath)}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${sessionToken}`
+                },
+                body: JSON.stringify({
+                    content: content,
+                    projectId: currentProject.id
+                })
+            });
+            
+            console.log('文件创建API响应:', response.status, response.statusText);
+            
+            if (response.ok) {
+                addChatMessage('ai', `✅ 文件 "${filePath}" 创建成功！`);
+                
+                // 重新加载项目结构
+                console.log('重新加载项目结构...');
+                try {
+                    await loadProjectStructure(currentProject);
+                    console.log('项目结构重新加载完成');
+                } catch (loadError) {
+                    console.error('重新加载项目结构失败:', loadError);
+                    addChatMessage('ai', '⚠️ 文件已创建，但项目结构刷新失败，请手动刷新项目。');
+                }
+                
+                // 自动打开新创建的文件
+                console.log('准备打开新创建的文件:', filePath);
+                setTimeout(async () => {
+                    try {
+                        await openFile(filePath);
+                        console.log('成功打开新创建的文件:', filePath);
+                        addChatMessage('ai', `📄 已自动打开文件 "${filePath}"，您可以开始编辑了！`);
+                    } catch (openError) {
+                        console.error('打开文件失败:', openError);
+                        addChatMessage('ai', `⚠️ 文件已创建，但自动打开失败。请在左侧文件树中手动点击打开文件 "${filePath}"。`);
+                    }
+                }, 800);
+                
+            } else {
+                const errorData = await response.json();
+                console.error('创建文件API错误:', errorData);
+                addChatMessage('ai', `❌ 创建文件失败: ${errorData.error || '未知错误'}`);
+            }
+        } catch (error) {
+            console.error('创建文件失败:', error);
+            addChatMessage('ai', `❌ 创建文件失败: ${error.message}`);
+        }
+    });
+}
+
+// 处理修改文件操作
+async function handleModifyFileAction(actionData) {
+    const { filePath, content, message } = actionData;
+    
+    if (!currentProject) {
+        addChatMessage('ai', '错误：没有选择项目，无法修改文件。');
+        return;
+    }
+    
+    // 检查是否是直接编辑当前文件
+    const isCurrentFile = currentFile && filePath === currentFile;
+    
+    if (isCurrentFile) {
+        // 直接编辑当前文件，显示编辑预览对话框
+        showFileEditDialog(filePath, content, message);
+    } else {
+        // 修改其他文件，使用原有的预览对话框
+        showFilePreviewDialog('modify', filePath, content, message, async () => {
+            try {
+                const sessionToken = localStorage.getItem('authToken');
+                const response = await fetch(`/api/projects/${currentProject.id}/files/${encodeURIComponent(filePath)}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${sessionToken}`
+                    },
+                    body: JSON.stringify({
+                        content: content,
+                        projectId: currentProject.id
+                    })
+                });
+                
+                if (response.ok) {
+                    addChatMessage('ai', `✅ 文件 "${filePath}" 修改成功！`);
+                    
+                    // 如果修改的是当前打开的文件，刷新显示
+                    if (currentFile === filePath) {
+                        await openFile(filePath);
+                    }
+                } else {
+                    const errorData = await response.json();
+                    addChatMessage('ai', `❌ 修改文件失败: ${errorData.error}`);
+                }
+            } catch (error) {
+                console.error('修改文件失败:', error);
+                addChatMessage('ai', `❌ 修改文件失败: ${error.message}`);
+            }
+        });
+    }
+}
+
+// 处理分析文件操作
+async function handleAnalyzeFileAction(actionData) {
+    const { message } = actionData;
+    addChatMessage('ai', message);
+}
+
+// 显示文件预览对话框
+function showFilePreviewDialog(action, filePath, content, message, onConfirm) {
+    // 移除已存在的对话框
+    const existingDialog = document.querySelector('.file-preview-dialog');
+    if (existingDialog) {
+        existingDialog.remove();
+    }
+    
+    const dialog = document.createElement('div');
+    dialog.className = 'file-preview-dialog';
+    dialog.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.7);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+        animation: fadeIn 0.3s ease;
+    `;
+    
+    const actionText = action === 'create' ? '创建' : '修改';
+    const actionIcon = action === 'create' ? 'fa-file-plus' : 'fa-edit';
+    
+    dialog.innerHTML = `
+        <div style="
+            background: white;
+            border-radius: 12px;
+            padding: 0;
+            max-width: 80vw;
+            max-height: 80vh;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            display: flex;
+            flex-direction: column;
+            min-width: 600px;
+        ">
+            <div style="
+                padding: 20px 25px;
+                background: linear-gradient(45deg, #4CAF50, #45a049);
+                color: white;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            ">
+                <div style="display: flex; align-items: center;">
+                    <i class="fas ${actionIcon}" style="margin-right: 10px; font-size: 20px;"></i>
+                    <h3 style="margin: 0;">AI ${actionText}文件预览</h3>
+                </div>
+                <button onclick="closeFilePreviewDialog()" style="
+                    background: none;
+                    border: none;
+                    color: white;
+                    font-size: 20px;
+                    cursor: pointer;
+                    padding: 5px;
+                    border-radius: 50%;
+                    transition: background 0.2s ease;
+                " onmouseover="this.style.background='rgba(255,255,255,0.2)'" onmouseout="this.style.background='none'">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div style="padding: 20px 25px; flex: 1; overflow-y: auto;">
+                <div style="margin-bottom: 15px;">
+                    <p style="margin: 0; color: #666; line-height: 1.5;">${message}</p>
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="font-weight: bold; color: #333; display: block; margin-bottom: 5px;">文件路径:</label>
+                    <div style="
+                        background: #f8f9fa;
+                        border: 1px solid #e9ecef;
+                        border-radius: 6px;
+                        padding: 10px;
+                        font-family: 'Courier New', monospace;
+                        color: #495057;
+                    ">${filePath}</div>
+                </div>
+                
+                <div style="margin-bottom: 20px;">
+                    <label style="font-weight: bold; color: #333; display: block; margin-bottom: 5px;">文件内容:</label>
+                    <pre style="
+                        background: #f8f9fa;
+                        border: 1px solid #e9ecef;
+                        border-radius: 6px;
+                        padding: 15px;
+                        font-family: 'Courier New', monospace;
+                        font-size: 13px;
+                        line-height: 1.4;
+                        color: #495057;
+                        max-height: 300px;
+                        overflow-y: auto;
+                        white-space: pre-wrap;
+                        word-wrap: break-word;
+                    ">${content}</pre>
+                </div>
+            </div>
+            
+            <div style="
+                padding: 20px 25px;
+                border-top: 1px solid #eee;
+                display: flex;
+                justify-content: flex-end;
+                gap: 10px;
+            ">
+                <button onclick="closeFilePreviewDialog()" style="
+                    padding: 10px 20px;
+                    border: 1px solid #6c757d;
+                    border-radius: 6px;
+                    background: white;
+                    color: #6c757d;
+                    cursor: pointer;
+                    font-size: 14px;
+                    transition: all 0.2s ease;
+                " onmouseover="this.style.background='#6c757d'; this.style.color='white';" onmouseout="this.style.background='white'; this.style.color='#6c757d';">
+                    取消
+                </button>
+                <button onclick="confirmFileAction()" style="
+                    padding: 10px 20px;
+                    border: 1px solid #4CAF50;
+                    border-radius: 6px;
+                    background: #4CAF50;
+                    color: white;
+                    cursor: pointer;
+                    font-size: 14px;
+                    transition: all 0.2s ease;
+                " onmouseover="this.style.background='#45a049';" onmouseout="this.style.background='#4CAF50';">
+                    <i class="fas fa-check" style="margin-right: 5px;"></i>
+                    确认${actionText}
+                </button>
+            </div>
+        </div>
+    `;
+    
+    // 存储确认回调
+    window.currentFileActionCallback = onConfirm;
+    
+    document.body.appendChild(dialog);
+    
+    // 点击背景关闭
+    dialog.addEventListener('click', function(e) {
+        if (e.target === dialog) {
+            closeFilePreviewDialog();
+        }
+    });
+}
+
+// 关闭文件预览对话框
+function closeFilePreviewDialog() {
+    const dialog = document.querySelector('.file-preview-dialog');
+    if (dialog) {
+        dialog.remove();
+    }
+    window.currentFileActionCallback = null;
+}
+
+// 确认文件操作
+async function confirmFileAction() {
+    if (window.currentFileActionCallback) {
+        const callback = window.currentFileActionCallback;
+        closeFilePreviewDialog();
+        await callback();
+    }
+}
+
+// 显示文件编辑对话框（用于直接编辑当前文件）
+function showFileEditDialog(filePath, newContent, message) {
+    // 保存原始内容
+    const originalContent = currentFileContent;
+    
+    // 移除已存在的对话框
+    const existingDialog = document.querySelector('.file-edit-dialog');
+    if (existingDialog) {
+        existingDialog.remove();
+    }
+    
+    const dialog = document.createElement('div');
+    dialog.className = 'file-edit-dialog';
+    dialog.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.8);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+        animation: fadeIn 0.3s ease;
+    `;
+    
+    dialog.innerHTML = `
+        <div style="
+            background: white;
+            border-radius: 12px;
+            padding: 0;
+            max-width: 90vw;
+            max-height: 90vh;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            display: flex;
+            flex-direction: column;
+            min-width: 800px;
+        ">
+            <div style="
+                padding: 20px 25px;
+                background: linear-gradient(45deg, #2196F3, #1976D2);
+                color: white;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            ">
+                <div style="display: flex; align-items: center;">
+                    <i class="fas fa-edit" style="margin-right: 10px; font-size: 20px;"></i>
+                    <h3 style="margin: 0;">AI直接编辑文档</h3>
+                </div>
+                <button onclick="closeFileEditDialog()" style="
+                    background: none;
+                    border: none;
+                    color: white;
+                    font-size: 20px;
+                    cursor: pointer;
+                    padding: 5px;
+                    border-radius: 50%;
+                    transition: background 0.2s ease;
+                " onmouseover="this.style.background='rgba(255,255,255,0.2)'" onmouseout="this.style.background='none'">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div style="padding: 20px 25px; flex: 1; overflow-y: auto;">
+                <div style="margin-bottom: 15px;">
+                    <p style="margin: 0; color: #666; line-height: 1.5; background: #f0f8ff; padding: 12px; border-radius: 6px; border-left: 4px solid #2196F3;">
+                        <i class="fas fa-info-circle" style="color: #2196F3; margin-right: 8px;"></i>
+                        ${message}
+                    </p>
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="font-weight: bold; color: #333; display: block; margin-bottom: 5px;">文件路径:</label>
+                    <div style="
+                        background: #f8f9fa;
+                        border: 1px solid #e9ecef;
+                        border-radius: 6px;
+                        padding: 10px;
+                        font-family: 'Courier New', monospace;
+                        color: #495057;
+                        display: flex;
+                        align-items: center;
+                    ">
+                        <i class="fas fa-file-code" style="margin-right: 8px; color: #6c757d;"></i>
+                        ${filePath}
+                    </div>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                    <div>
+                        <label style="font-weight: bold; color: #333; display: block; margin-bottom: 5px;">
+                            <i class="fas fa-file-alt" style="margin-right: 5px; color: #dc3545;"></i>
+                            原始内容
+                        </label>
+                        <pre style="
+                            background: #fff5f5;
+                            border: 1px solid #f5c6cb;
+                            border-radius: 6px;
+                            padding: 15px;
+                            font-family: 'Courier New', monospace;
+                            font-size: 12px;
+                            line-height: 1.4;
+                            color: #495057;
+                            height: 400px;
+                            overflow-y: auto;
+                            white-space: pre-wrap;
+                            word-wrap: break-word;
+                            margin: 0;
+                        ">${originalContent}</pre>
+                    </div>
+                    
+                    <div>
+                        <label style="font-weight: bold; color: #333; display: block; margin-bottom: 5px;">
+                            <i class="fas fa-file-code" style="margin-right: 5px; color: #28a745;"></i>
+                            新内容（AI编辑后）
+                        </label>
+                        <pre style="
+                            background: #f8fff8;
+                            border: 1px solid #d4edda;
+                            border-radius: 6px;
+                            padding: 15px;
+                            font-family: 'Courier New', monospace;
+                            font-size: 12px;
+                            line-height: 1.4;
+                            color: #495057;
+                            height: 400px;
+                            overflow-y: auto;
+                            white-space: pre-wrap;
+                            word-wrap: break-word;
+                            margin: 0;
+                        ">${newContent}</pre>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="
+                padding: 20px 25px;
+                border-top: 1px solid #eee;
+                display: flex;
+                justify-content: center;
+                gap: 15px;
+                background: #f8f9fa;
+            ">
+                <button onclick="rejectFileEdit()" style="
+                    padding: 12px 24px;
+                    border: 2px solid #dc3545;
+                    border-radius: 8px;
+                    background: white;
+                    color: #dc3545;
+                    cursor: pointer;
+                    font-size: 14px;
+                    font-weight: bold;
+                    transition: all 0.2s ease;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                " onmouseover="this.style.background='#dc3545'; this.style.color='white';" onmouseout="this.style.background='white'; this.style.color='#dc3545';">
+                    <i class="fas fa-times-circle"></i>
+                    撤销修改
+                </button>
+                <button onclick="acceptFileEdit()" style="
+                    padding: 12px 24px;
+                    border: 2px solid #28a745;
+                    border-radius: 8px;
+                    background: #28a745;
+                    color: white;
+                    cursor: pointer;
+                    font-size: 14px;
+                    font-weight: bold;
+                    transition: all 0.2s ease;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                " onmouseover="this.style.background='#218838';" onmouseout="this.style.background='#28a745';">
+                    <i class="fas fa-check-circle"></i>
+                    保留修改
+                </button>
+            </div>
+        </div>
+    `;
+    
+    // 存储编辑数据
+    window.currentFileEditData = {
+        filePath: filePath,
+        originalContent: originalContent,
+        newContent: newContent
+    };
+    
+    // 立即应用新内容到编辑器（预览效果）
+    applyContentToEditor(newContent);
+    
+    document.body.appendChild(dialog);
+    
+    // 点击背景关闭
+    dialog.addEventListener('click', function(e) {
+        if (e.target === dialog) {
+            rejectFileEdit();
+        }
+    });
+}
+
+// 关闭文件编辑对话框
+function closeFileEditDialog() {
+    const dialog = document.querySelector('.file-edit-dialog');
+    if (dialog) {
+        dialog.remove();
+    }
+    window.currentFileEditData = null;
+}
+
+// 接受文件编辑
+async function acceptFileEdit() {
+    if (!window.currentFileEditData) return;
+    
+    const { filePath, newContent } = window.currentFileEditData;
+    
+    try {
+        addChatMessage('ai', `🔄 正在保存文件 "${filePath}"...`);
+        
+        const sessionToken = localStorage.getItem('authToken');
+        const response = await fetch(`/api/projects/${currentProject.id}/files/${encodeURIComponent(filePath)}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${sessionToken}`
+            },
+            body: JSON.stringify({
+                content: newContent,
+                projectId: currentProject.id
+            })
+        });
+        
+        if (response.ok) {
+            // 更新当前文件内容
+            currentFileContent = newContent;
+            
+            addChatMessage('ai', `✅ 文件修改已保存！文档已成功更新。`);
+            
+            // 关闭对话框
+            closeFileEditDialog();
+            
+            // 重新加载项目结构
+            await loadProjectStructure(currentProject);
+        } else {
+            const errorData = await response.json();
+            throw new Error(errorData.error || '保存文件失败');
+        }
+    } catch (error) {
+        console.error('保存文件失败:', error);
+        addChatMessage('ai', `❌ 保存文件失败: ${error.message}`);
+    }
+}
+
+// 拒绝文件编辑
+function rejectFileEdit() {
+    if (!window.currentFileEditData) return;
+    
+    const { originalContent } = window.currentFileEditData;
+    
+    // 恢复原始内容
+    applyContentToEditor(originalContent);
+    
+    addChatMessage('ai', `↩️ 文件修改已撤销，已恢复到原始内容。`);
+    
+    // 关闭对话框
+    closeFileEditDialog();
+}
+
+// 应用内容到编辑器
+function applyContentToEditor(content) {
+    // 更新预览区域
+    const fileContentDiv = document.getElementById('fileContent');
+    if (fileContentDiv) {
+        // 检测语言并高亮显示
+        const language = detectLanguage(currentFile);
+        if (window.hljs) {
+            try {
+                const highlightedCode = hljs.highlight(content, { language }).value;
+                fileContentDiv.innerHTML = `<pre><code class="hljs language-${language}">${highlightedCode}</code></pre>`;
+            } catch (e) {
+                fileContentDiv.innerHTML = `<pre><code>${content}</code></pre>`;
+            }
+        } else {
+            fileContentDiv.innerHTML = `<pre><code>${content}</code></pre>`;
+        }
+    }
+    
+    // 如果正在编辑模式，也更新编辑器
+    const codeEditor = document.getElementById('codeEditor');
+    if (codeEditor && codeEditor.style.display !== 'none') {
+        codeEditor.value = content;
+    }
+    
+    // 更新当前文件内容变量
+    currentFileContent = content;
 }
 
 // 添加聊天消息到界面
