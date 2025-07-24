@@ -1285,6 +1285,25 @@
             text-align: center;
         }
 
+        /* 代码选择菜单特殊样式 */
+        .code-selection-menu {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .code-selection-menu .context-menu-item {
+            font-size: 14px;
+        }
+
+        .code-selection-menu .context-menu-item.disabled {
+            opacity: 0.6;
+            cursor: default;
+            font-style: italic;
+        }
+
+        .code-selection-menu .context-menu-item.disabled:hover {
+            background: none;
+        }
+
         /* 剪贴板状态指示 */
         .tree-item.clipboard-cut {
             opacity: 0.6;
@@ -1777,54 +1796,129 @@
 
         .chat-input-area {
             border-top: 1px solid #e0e0e0;
-            padding: 15px;
-            background: white;
+            padding: 12px 15px;
+            background: #f8f9fa;
+            border-bottom-left-radius: 12px;
+            border-bottom-right-radius: 12px;
         }
 
         .chat-input-container {
             display: flex;
-            gap: 10px;
+            gap: 8px;
             align-items: flex-end;
+            background: white;
+            border: 1px solid #d0d7de;
+            border-radius: 6px;
+            padding: 2px;
+            transition: all 0.2s ease;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .chat-input-container:focus-within {
+            border-color: #4CAF50;
+            box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.1);
         }
 
         .chat-input {
             flex: 1;
-            border: 1px solid #ddd;
-            border-radius: 20px;
-            padding: 10px 15px;
+            border: none;
+            background: transparent;
+            padding: 8px 12px;
             resize: none;
-            max-height: 100px;
-            min-height: 40px;
-            font-family: inherit;
+            max-height: 120px;
+            min-height: 36px;
+            font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Source Code Pro', monospace;
+            font-size: 14px;
+            line-height: 1.4;
             outline: none;
-            transition: border-color 0.3s ease;
+            overflow-y: auto;
+            word-wrap: break-word;
+            transition: all 0.2s ease;
         }
 
         .chat-input:focus {
-            border-color: #4CAF50;
+            outline: none;
+        }
+
+        .chat-input::placeholder {
+            color: #8c959f;
+            font-style: italic;
         }
 
         .send-btn {
             background: #4CAF50;
             border: none;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
+            border-radius: 4px;
+            width: 36px;
+            height: 36px;
             color: white;
             cursor: pointer;
-            transition: background 0.3s ease;
+            transition: all 0.2s ease;
             display: flex;
             align-items: center;
             justify-content: center;
+            margin: 2px;
+            font-size: 14px;
         }
 
         .send-btn:hover:not(:disabled) {
             background: #45a049;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
         }
 
         .send-btn:disabled {
-            background: #ccc;
+            background: #e0e0e0;
+            color: #999;
             cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        /* 输入框自适应高度的过渡效果 */
+        .chat-input {
+            transition: height 0.15s ease-out, box-shadow 0.2s ease;
+        }
+
+        /* 输入框滚动条样式（类似VSCode） */
+        .chat-input::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .chat-input::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .chat-input::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 4px;
+        }
+
+        .chat-input::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
+        }
+
+        /* 容器的过渡效果 */
+        .chat-input-container {
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .chat-input-container {
+                padding: 1px;
+            }
+            
+            .chat-input {
+                font-size: 16px; /* 防止iOS自动缩放 */
+                padding: 6px 10px;
+            }
+            
+            .send-btn {
+                width: 32px;
+                height: 32px;
+                font-size: 12px;
+            }
         }
 
         /* 历史对话模态框样式 */
@@ -2991,7 +3085,13 @@
                         </div>
                         <div class="chat-input-area">
                             <div class="chat-input-container">
-                                <textarea class="chat-input" id="chatInput" placeholder="输入您的问题..." rows="1"></textarea>
+                                <textarea 
+                                    class="chat-input" 
+                                    id="chatInput" 
+                                    placeholder="输入您的问题... (Shift+Enter 换行)" 
+                                    rows="1"
+                                    spellcheck="false"
+                                    wrap="soft"></textarea>
                                 <button class="send-btn" onclick="sendChatMessage()" disabled>
                                     <i class="fas fa-paper-plane"></i>
                                 </button>

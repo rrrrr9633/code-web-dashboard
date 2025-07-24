@@ -47,6 +47,9 @@ document.addEventListener('DOMContentLoaded', function() {
     setupDragAndDrop();
     setupKeyboardShortcuts();
     
+    // 设置代码选择右键菜单
+    setupCodeSelectionMenu();
+    
     // 显示数据库持久化提示
     showPersistenceNotification();
 });
@@ -5575,6 +5578,10 @@ function showContextMenu(x, y, item) {
                 <i class="fas fa-file-alt"></i>
                 打开文件
             </div>
+            <div class="context-menu-item" onclick="addFileToAIChat('${item.path}')">
+                <i class="fas fa-robot" style="color: #4CAF50;"></i>
+                添加到AI对话
+            </div>
             <hr style="margin: 4px 0; border: none; border-top: 1px solid #eee;">
             <div class="context-menu-item" onclick="copyItem('${item.path}', 'file')">
                 <i class="fas fa-copy"></i>
@@ -6828,6 +6835,17 @@ async function sendChatMessage() {
     const sendBtn = document.querySelector('.send-btn');
     sendBtn.disabled = true;
     
+    // 重置输入框高度
+    chatInput.style.height = '36px';
+    chatInput.style.overflowY = 'hidden';
+    
+    // 重置容器样式
+    const container = chatInput.closest('.chat-input-container');
+    if (container) {
+        container.style.borderColor = '#d0d7de';
+        container.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
+    }
+    
     // 添加用户消息到界面
     addChatMessage('user', message);
     
@@ -7752,14 +7770,54 @@ function setupChatInput() {
     
     if (!chatInput || !sendBtn) return;
     
+    // 设置初始高度
+    const initialHeight = 36; // 最小高度
+    const maxHeight = 120; // 最大高度
+    const lineHeight = 20; // 行高
+    
+    // 自动调整高度的函数
+    function adjustHeight() {
+        // 重置高度以获取准确的scrollHeight
+        chatInput.style.height = initialHeight + 'px';
+        
+        // 计算内容高度
+        const scrollHeight = chatInput.scrollHeight;
+        const newHeight = Math.max(initialHeight, Math.min(scrollHeight, maxHeight));
+        
+        // 设置新高度
+        chatInput.style.height = newHeight + 'px';
+        
+        // 如果内容超过最大高度，显示滚动条
+        if (scrollHeight > maxHeight) {
+            chatInput.style.overflowY = 'auto';
+        } else {
+            chatInput.style.overflowY = 'hidden';
+        }
+    }
+    
     // 监听输入变化
     chatInput.addEventListener('input', function() {
         const hasContent = this.value.trim().length > 0;
         sendBtn.disabled = !hasContent;
         
         // 自动调整高度
-        this.style.height = 'auto';
-        this.style.height = Math.min(this.scrollHeight, 100) + 'px';
+        adjustHeight();
+        
+        // 添加打字效果的视觉反馈
+        const container = this.closest('.chat-input-container');
+        if (hasContent) {
+            container.style.borderColor = '#4CAF50';
+        } else {
+            container.style.borderColor = '#d0d7de';
+        }
+    });
+    
+    // 监听粘贴事件
+    chatInput.addEventListener('paste', function() {
+        // 延迟调整高度，等待粘贴内容插入
+        setTimeout(() => {
+            adjustHeight();
+        }, 10);
     });
     
     // 监听按键
@@ -7770,10 +7828,40 @@ function setupChatInput() {
                 sendChatMessage();
             }
         }
+        
+        // 支持Tab键缩进（类似代码编辑器）
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            const start = this.selectionStart;
+            const end = this.selectionEnd;
+            
+            // 插入4个空格
+            this.value = this.value.substring(0, start) + '    ' + this.value.substring(end);
+            this.selectionStart = this.selectionEnd = start + 4;
+            
+            // 触发input事件以调整高度
+            this.dispatchEvent(new Event('input'));
+        }
+    });
+    
+    // 监听焦点事件
+    chatInput.addEventListener('focus', function() {
+        const container = this.closest('.chat-input-container');
+        container.style.borderColor = '#4CAF50';
+        container.style.boxShadow = '0 0 0 2px rgba(76, 175, 80, 0.1)';
+    });
+    
+    chatInput.addEventListener('blur', function() {
+        if (!this.value.trim()) {
+            const container = this.closest('.chat-input-container');
+            container.style.borderColor = '#d0d7de';
+            container.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
+        }
     });
     
     // 初始状态
     sendBtn.disabled = true;
+    adjustHeight();
 }
 
 // 设置对话面板拖拽功能
@@ -7855,4 +7943,407 @@ function setupChatPanelResize() {
             isResizing = false;
         }
     });
+}
+
+// ============ 代码选择和AI对话集成功能 ============
+
+// 设置代码选择右键菜单
+function setupCodeSelectionMenu() {
+    console.log('🔧 初始化代码选择右键菜单');
+    
+    // 监听文档的右键点击事件
+    document.addEventListener('contextmenu', function(e) {
+        console.log('🖱️ 右键点击事件触发，目标元素:', e.target);
+        
+        // 检查是否在代码显示区域
+        const codeContent = document.getElementById('codeContent');
+        const readOnlyView = document.getElementById('readOnlyView');
+        const editModeView = document.getElementById('editModeView');
+        const codeEditor = document.getElementById('codeEditor');
+        
+        console.log('📋 DOM元素检查:', {
+            codeContent: !!codeContent,
+            readOnlyView: !!readOnlyView,
+            editModeView: !!editModeView,
+            codeEditor: !!codeEditor
+        });
+        
+        let isInCodeArea = false;
+        let selectedText = '';
+        
+        // 首先检查是否有选中的文本
+        const globalSelection = window.getSelection().toString().trim();
+        console.log('🔍 全局选中文本:', globalSelection);
+        
+        // 检查是否在代码内容区域
+        if (codeContent && codeContent.contains(e.target)) {
+            console.log('✅ 点击位置在代码内容区域内');
+            
+            // 检查是否在只读视图（代码显示区域）
+            if (readOnlyView && readOnlyView.contains(e.target)) {
+                console.log('✅ 在只读视图中');
+                isInCodeArea = true;
+                selectedText = globalSelection;
+            }
+            // 检查是否在编辑模式
+            else if (editModeView && editModeView.contains(e.target) && codeEditor) {
+                console.log('✅ 在编辑模式中');
+                isInCodeArea = true;
+                // 获取编辑器中选中的文本
+                if (codeEditor === document.activeElement) {
+                    const start = codeEditor.selectionStart;
+                    const end = codeEditor.selectionEnd;
+                    selectedText = codeEditor.value.substring(start, end).trim();
+                    console.log('📝 从编辑器获取选中文本:', selectedText);
+                } else {
+                    // 如果编辑器不是焦点，也尝试获取选中文本
+                    selectedText = globalSelection;
+                }
+            }
+        }
+        
+        console.log('🎯 最终检查结果:', {
+            isInCodeArea,
+            selectedText,
+            selectedTextLength: selectedText.length
+        });
+        
+        // 修改条件：如果在代码区域，无论是否有选中文本都显示菜单
+        if (isInCodeArea) {
+            e.preventDefault();
+            console.log('🎉 显示代码选择菜单');
+            showCodeSelectionContextMenu(e.clientX, e.clientY, selectedText);
+        } else {
+            console.log('❌ 不在代码区域，不显示自定义菜单');
+        }
+    });
+    
+    console.log('✅ 代码选择右键菜单初始化完成');
+}
+
+// 显示代码选择上下文菜单
+function showCodeSelectionContextMenu(x, y, selectedText) {
+    console.log('🎨 创建代码选择上下文菜单:', { x, y, selectedText });
+    
+    // 移除已存在的菜单
+    const existingMenu = document.querySelector('.code-selection-menu');
+    if (existingMenu) {
+        existingMenu.remove();
+        console.log('🗑️ 移除已存在的菜单');
+    }
+    
+    // 将选中的文本存储到全局变量，避免在HTML属性中传递
+    window.selectedCodeText = selectedText;
+    
+    const menu = document.createElement('div');
+    menu.className = 'code-selection-menu context-menu';
+    menu.style.cssText = `
+        position: fixed !important;
+        left: ${x}px !important;
+        top: ${y}px !important;
+        background: white !important;
+        border: 1px solid #e1e8ed !important;
+        border-radius: 8px !important;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
+        z-index: 99999 !important;
+        min-width: 200px !important;
+        padding: 8px 0 !important;
+        font-size: 14px !important;
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+    `;
+    
+    let menuContent = '';
+    
+    if (selectedText && selectedText.length > 0) {
+        // 有选中文本时的菜单
+        const previewText = selectedText.length > 50 ? 
+            selectedText.substring(0, 50) + '...' : selectedText;
+        
+        menuContent = `
+            <div class="context-menu-item" onclick="addCodeToAIChat()" style="padding: 8px 12px; cursor: pointer; display: flex; align-items: center; border-bottom: none;">
+                <i class="fas fa-robot" style="color: #4CAF50; margin-right: 8px;"></i>
+                添加选中代码到AI对话
+            </div>
+            <div class="context-menu-item" onclick="addCodeToAIChatWithContext()" style="padding: 8px 12px; cursor: pointer; display: flex; align-items: center; border-bottom: none;">
+                <i class="fas fa-comments" style="color: #2196F3; margin-right: 8px;"></i>
+                添加选中代码到AI对话（带上下文）
+            </div>
+            <hr style="margin: 4px 0; border: none; border-top: 1px solid #eee;">
+            <div class="context-menu-item disabled" style="font-size: 12px; color: #666; padding: 4px 12px;">
+                选中内容: ${escapeForHTML(previewText)}
+            </div>
+        `;
+    } else {
+        // 没有选中文本时的菜单
+        menuContent = `
+            <div class="context-menu-item" onclick="addCurrentFileToAIChat()" style="padding: 8px 12px; cursor: pointer; display: flex; align-items: center; border-bottom: none;">
+                <i class="fas fa-file-code" style="color: #FF9800; margin-right: 8px;"></i>
+                添加当前文件到AI对话
+            </div>
+            <div class="context-menu-item" onclick="analyzeCurrentCode()" style="padding: 8px 12px; cursor: pointer; display: flex; align-items: center; border-bottom: none;">
+                <i class="fas fa-search" style="color: #9C27B0; margin-right: 8px;"></i>
+                分析当前代码
+            </div>
+            <hr style="margin: 4px 0; border: none; border-top: 1px solid #eee;">
+            <div class="context-menu-item disabled" style="font-size: 12px; color: #666; padding: 4px 12px;">
+                <i class="fas fa-info-circle" style="margin-right: 5px;"></i>
+                未选中任何代码
+            </div>
+        `;
+    }
+    
+    menu.innerHTML = menuContent;
+    
+    // 添加菜单项悬停效果
+    const menuItems = menu.querySelectorAll('.context-menu-item:not(.disabled)');
+    menuItems.forEach(item => {
+        item.addEventListener('mouseenter', function() {
+            this.style.backgroundColor = '#f5f5f5';
+        });
+        item.addEventListener('mouseleave', function() {
+            this.style.backgroundColor = 'transparent';
+        });
+    });
+    
+    document.body.appendChild(menu);
+    console.log('✅ 菜单已添加到页面，元素:', menu);
+    console.log('📍 菜单位置和样式:', {
+        position: menu.style.position,
+        left: menu.style.left,
+        top: menu.style.top,
+        zIndex: menu.style.zIndex,
+        display: menu.style.display,
+        visibility: menu.style.visibility
+    });
+    
+    // 强制重绘
+    menu.offsetHeight;
+    
+    // 调整菜单位置，确保不超出屏幕
+    setTimeout(() => {
+        const rect = menu.getBoundingClientRect();
+        console.log('📏 菜单尺寸:', rect);
+        
+        let newX = x;
+        let newY = y;
+        
+        if (rect.right > window.innerWidth) {
+            newX = x - rect.width;
+            console.log('🔄 调整X位置:', newX);
+        }
+        if (rect.bottom > window.innerHeight) {
+            newY = y - rect.height;
+            console.log('🔄 调整Y位置:', newY);
+        }
+        
+        if (newX !== x || newY !== y) {
+            menu.style.left = newX + 'px';
+            menu.style.top = newY + 'px';
+        }
+    }, 0);
+    
+    // 点击其他地方关闭菜单
+    setTimeout(() => {
+        document.addEventListener('click', function closeMenu(e) {
+            if (!menu.contains(e.target)) {
+                console.log('🗑️ 关闭代码选择菜单');
+                menu.remove();
+                document.removeEventListener('click', closeMenu);
+            }
+        });
+    }, 100);
+}
+
+// 添加代码到AI对话
+function addCodeToAIChat() {
+    const codeText = window.selectedCodeText;
+    if (!codeText) return;
+    
+    // 清理菜单
+    const menu = document.querySelector('.code-selection-menu');
+    if (menu) menu.remove();
+    
+    // 确保AI聊天面板打开
+    const chatPanel = document.getElementById('aiChatPanel');
+    if (!chatPanel.classList.contains('open')) {
+        openAIChatPanel();
+    }
+    
+    // 构造消息
+    const message = `请帮我分析这段代码：\n\n\`\`\`\n${codeText}\n\`\`\``;
+    
+    // 填充到输入框
+    const chatInput = document.getElementById('chatInput');
+    if (chatInput) {
+        chatInput.value = message;
+        chatInput.focus();
+        
+        // 启用发送按钮
+        const sendBtn = document.querySelector('.send-btn');
+        if (sendBtn) {
+            sendBtn.disabled = false;
+        }
+    }
+    
+    showNotification('代码已添加到AI对话框', 'success');
+}
+
+// 添加代码到AI对话（带文件上下文）
+function addCodeToAIChatWithContext() {
+    const codeText = window.selectedCodeText;
+    if (!codeText) return;
+    
+    // 清理菜单
+    const menu = document.querySelector('.code-selection-menu');
+    if (menu) menu.remove();
+    
+    // 确保AI聊天面板打开
+    const chatPanel = document.getElementById('aiChatPanel');
+    if (!chatPanel.classList.contains('open')) {
+        openAIChatPanel();
+    }
+    
+    // 构造带上下文的消息
+    let message = `请帮我分析这段代码`;
+    
+    if (currentFile) {
+        message += `（来自文件：${currentFile}）`;
+    }
+    
+    message += `：\n\n\`\`\`\n${codeText}\n\`\`\`\n\n`;
+    message += `请结合当前文件的整体结构和功能来分析这段代码的作用和可能的改进建议。`;
+    
+    // 填充到输入框
+    const chatInput = document.getElementById('chatInput');
+    if (chatInput) {
+        chatInput.value = message;
+        chatInput.focus();
+        
+        // 启用发送按钮
+        const sendBtn = document.querySelector('.send-btn');
+        if (sendBtn) {
+            sendBtn.disabled = false;
+        }
+    }
+    
+    showNotification('代码和上下文已添加到AI对话框', 'success');
+}
+
+// HTML转义函数
+function escapeForHTML(text) {
+    return text.replace(/'/g, '&#39;')
+               .replace(/"/g, '&quot;')
+               .replace(/</g, '&lt;')
+               .replace(/>/g, '&gt;')
+               .replace(/&/g, '&amp;');
+}
+
+// 添加当前文件到AI对话
+function addCurrentFileToAIChat() {
+    // 清理菜单
+    const menu = document.querySelector('.code-selection-menu');
+    if (menu) menu.remove();
+    
+    if (!currentFile) {
+        showNotification('没有打开的文件', 'warning');
+        return;
+    }
+    
+    // 确保AI聊天面板打开
+    const chatPanel = document.getElementById('aiChatPanel');
+    if (!chatPanel.classList.contains('open')) {
+        openAIChatPanel();
+    }
+    
+    // 构造消息
+    const message = `请帮我分析当前文件 "${currentFile}"，包括它的功能、结构和可能的改进建议。`;
+    
+    // 填充到输入框
+    const chatInput = document.getElementById('chatInput');
+    if (chatInput) {
+        chatInput.value = message;
+        chatInput.focus();
+        
+        // 启用发送按钮
+        const sendBtn = document.querySelector('.send-btn');
+        if (sendBtn) {
+            sendBtn.disabled = false;
+        }
+    }
+    
+    showNotification('当前文件已添加到AI对话框', 'success');
+}
+
+// 分析当前代码
+function analyzeCurrentCode() {
+    // 清理菜单
+    const menu = document.querySelector('.code-selection-menu');
+    if (menu) menu.remove();
+    
+    if (!currentFile || !currentFileContent) {
+        showNotification('没有可分析的代码内容', 'warning');
+        return;
+    }
+    
+    // 确保AI聊天面板打开
+    const chatPanel = document.getElementById('aiChatPanel');
+    if (!chatPanel.classList.contains('open')) {
+        openAIChatPanel();
+    }
+    
+    // 构造消息
+    const message = `请帮我详细分析当前文件 "${currentFile}" 的代码，包括：
+1. 代码的主要功能和目的
+2. 代码结构和设计模式
+3. 潜在的问题或改进建议
+4. 性能优化建议`;
+    
+    // 填充到输入框
+    const chatInput = document.getElementById('chatInput');
+    if (chatInput) {
+        chatInput.value = message;
+        chatInput.focus();
+        
+        // 启用发送按钮
+        const sendBtn = document.querySelector('.send-btn');
+        if (sendBtn) {
+            sendBtn.disabled = false;
+        }
+    }
+    
+    showNotification('代码分析请求已添加到AI对话框', 'success');
+}
+
+// 添加文件到AI对话
+function addFileToAIChat(filePath) {
+    if (!currentProject) {
+        showNotification('没有选择项目', 'error');
+        return;
+    }
+    
+    // 确保AI聊天面板打开
+    const chatPanel = document.getElementById('aiChatPanel');
+    if (!chatPanel.classList.contains('open')) {
+        openAIChatPanel();
+    }
+    
+    // 构造消息
+    const message = `请帮我分析文件 "${filePath}"，包括它的功能、结构和可能的改进建议。`;
+    
+    // 填充到输入框
+    const chatInput = document.getElementById('chatInput');
+    if (chatInput) {
+        chatInput.value = message;
+        chatInput.focus();
+        
+        // 启用发送按钮
+        const sendBtn = document.querySelector('.send-btn');
+        if (sendBtn) {
+            sendBtn.disabled = false;
+        }
+    }
+    
+    showNotification(`文件 "${filePath}" 已添加到AI对话框`, 'success');
 }
