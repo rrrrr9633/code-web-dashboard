@@ -2475,6 +2475,8 @@ function setupAIConfigForm() {
     const form = document.getElementById('aiConfigUpdateForm');
     const presetButtons = document.querySelectorAll('#aiConfigModal .preset-btn');
     const apiUrlInput = document.getElementById('configApiUrl');
+    const modelSelect = document.getElementById('configModelSelect');
+    const modelInput = document.getElementById('configModel');
     
     // 预设按钮处理
     presetButtons.forEach(button => {
@@ -2483,10 +2485,47 @@ function setupAIConfigForm() {
             this.classList.add('active');
             
             const url = this.dataset.url;
-            if (url) {
-                apiUrlInput.value = url;
+            const model = this.dataset.model;
+            
+            // 设置API URL
+            apiUrlInput.value = url;
+            
+            // 根据URL更新可用模型选项
+            updateModelOptionsForProvider(url);
+            
+            if (model) {
+                // 延迟设置模型值，确保选项已更新
+                setTimeout(() => {
+                    const option = modelSelect.querySelector(`option[value="${model}"]`);
+                    if (option) {
+                        modelSelect.value = model;
+                        modelInput.style.display = 'none';
+                    } else {
+                        modelSelect.value = 'custom';
+                        modelInput.value = model;
+                        modelInput.style.display = 'block';
+                    }
+                }, 100);
             }
         });
+    });
+
+    // API URL输入框变化时也要更新模型选项
+    apiUrlInput.addEventListener('input', function() {
+        updateModelOptionsForProvider(this.value);
+    });
+
+    // 模型选择处理
+    modelSelect.addEventListener('change', function() {
+        if (this.value === 'custom') {
+            modelInput.style.display = 'block';
+            modelInput.focus();
+        } else {
+            modelInput.style.display = 'none';
+            if (this.value === '') {
+                modelInput.value = '';
+            }
+        }
     });
 
     // 表单提交处理
@@ -2496,14 +2535,139 @@ function setupAIConfigForm() {
     });
 }
 
+// 根据预设按钮更新模型选项
+function updateModelOptionsForProvider(apiUrl) {
+    const modelSelect = document.getElementById('configModelSelect');
+    const customModelInput = document.getElementById('configModel');
+    
+    // 清除现有选项
+    modelSelect.innerHTML = '';
+    
+    // 添加基本选项
+    const emptyOption = document.createElement('option');
+    emptyOption.value = '';
+    emptyOption.textContent = '选择预设模型';
+    modelSelect.appendChild(emptyOption);
+    
+    if (!apiUrl) {
+        // 自定义选项 - 只显示自定义输入
+        const customOption = document.createElement('option');
+        customOption.value = 'custom';
+        customOption.textContent = '自定义模型名称';
+        modelSelect.appendChild(customOption);
+        
+        // 默认选择自定义并显示输入框
+        modelSelect.value = 'custom';
+        customModelInput.style.display = 'block';
+        customModelInput.required = true;
+        return;
+    }
+    
+    // 识别提供商并添加对应的预设模型
+    let provider = 'generic';
+    if (apiUrl.includes('openai.com')) {
+        provider = 'openai';
+    } else if (apiUrl.includes('deepseek.com')) {
+        provider = 'deepseek';
+    } else if (apiUrl.includes('anthropic.com')) {
+        provider = 'claude';
+    }
+    
+    const modelGroups = {
+        openai: [
+            { value: 'gpt-4', text: 'GPT-4' },
+            { value: 'gpt-4-turbo', text: 'GPT-4 Turbo' },
+            { value: 'gpt-3.5-turbo', text: 'GPT-3.5 Turbo' },
+            { value: 'gpt-4o', text: 'GPT-4o' },
+            { value: 'gpt-4o-mini', text: 'GPT-4o Mini' }
+        ],
+        deepseek: [
+            { value: 'deepseek-chat', text: 'DeepSeek Chat' },
+            { value: 'deepseek-coder', text: 'DeepSeek Coder' }
+        ],
+        claude: [
+            { value: 'claude-3-opus-20240229', text: 'Claude 3 Opus' },
+            { value: 'claude-3-sonnet-20240229', text: 'Claude 3 Sonnet' },
+            { value: 'claude-3-haiku-20240307', text: 'Claude 3 Haiku' }
+        ],
+        generic: [
+            { value: 'gpt-3.5-turbo', text: 'GPT-3.5 Turbo (通用)' },
+            { value: 'gpt-4', text: 'GPT-4 (通用)' }
+        ]
+    };
+    
+    const models = modelGroups[provider] || modelGroups.generic;
+    
+    if (models.length > 0) {
+        models.forEach(model => {
+            const option = document.createElement('option');
+            option.value = model.value;
+            option.textContent = model.text;
+            modelSelect.appendChild(option);
+        });
+    }
+    
+    // 隐藏自定义输入框
+    customModelInput.style.display = 'none';
+    customModelInput.required = false;
+}
+
+// 获取提供商中文名称
+function getProviderName(provider) {
+    const names = {
+        openai: 'OpenAI',
+        deepseek: 'DeepSeek',
+        claude: 'Claude',
+        generic: '通用'
+    };
+    return names[provider] || '未知';
+}
+
 function openAIConfigModal() {
     const modal = document.getElementById('aiConfigModal');
+    const modalContent = modal.querySelector('.modal-content');
+    
     modal.style.display = 'block';
     
-    // 触发位置恢复事件
+    // 首先确保模态框居中显示
     setTimeout(() => {
+        // 检查是否有保存的位置
+        const savedPosition = localStorage.getItem('aiConfigModalPosition');
+        if (savedPosition) {
+            try {
+                const position = JSON.parse(savedPosition);
+                
+                // 确保位置在视窗范围内
+                const modalWidth = modalContent.offsetWidth;
+                const modalHeight = modalContent.offsetHeight;
+                
+                // 计算有效位置
+                const validLeft = Math.max(50, Math.min(position.left, window.innerWidth - modalWidth - 50));
+                const validTop = Math.max(50, Math.min(position.top, window.innerHeight - modalHeight - 50));
+                
+                modalContent.style.left = validLeft + 'px';
+                modalContent.style.top = validTop + 'px';
+                modalContent.style.transform = 'none';
+            } catch (e) {
+                console.warn('恢复模态框位置失败，使用默认居中位置:', e);
+                // 如果恢复失败，重置为居中
+                modalContent.style.left = '50%';
+                modalContent.style.top = '10%';
+                modalContent.style.transform = 'translateX(-50%)';
+            }
+        } else {
+            // 没有保存的位置，确保居中显示
+            modalContent.style.left = '50%';
+            modalContent.style.top = '10%';
+            modalContent.style.transform = 'translateX(-50%)';
+        }
+        
+        // 触发位置恢复事件
         modal.dispatchEvent(new Event('show'));
     }, 10);
+    
+    // 初始化模型选项为通用选项
+    updateModelOptionsForProvider('');
     
     // 加载当前配置
     loadCurrentAIConfig();
@@ -2601,13 +2765,35 @@ async function loadCurrentAIConfig() {
                 updateCurrentConfigDisplay(data.config);
                 
                 // 填充表单
-                document.getElementById('configApiUrl').value = data.config.apiUrl;
+                const apiUrl = data.config.apiUrl;
+                document.getElementById('configApiUrl').value = apiUrl;
+                
+                // 根据API URL更新模型选项
+                updateModelOptionsForProvider(apiUrl);
+                
+                // 延迟填充模型信息，确保选项已更新
+                setTimeout(() => {
+                    const modelSelect = document.getElementById('configModelSelect');
+                    const modelInput = document.getElementById('configModel');
+                    if (data.config.model) {
+                        const option = modelSelect.querySelector(`option[value="${data.config.model}"]`);
+                        if (option) {
+                            modelSelect.value = data.config.model;
+                            modelInput.style.display = 'none';
+                        } else {
+                            modelSelect.value = 'custom';
+                            modelInput.value = data.config.model;
+                            modelInput.style.display = 'block';
+                        }
+                    }
+                }, 200);
                 
                 // 选择对应的预设按钮
                 const presetButtons = document.querySelectorAll('#aiConfigModal .preset-btn');
                 presetButtons.forEach(btn => {
                     btn.classList.remove('active');
-                    if (btn.dataset.url === data.config.apiUrl) {
+                    if (btn.dataset.url === apiUrl && 
+                        (btn.dataset.model === data.config.model || !btn.dataset.model)) {
                         btn.classList.add('active');
                     }
                 });
@@ -2625,6 +2811,7 @@ function updateCurrentConfigDisplay(config) {
     currentConfigDiv.innerHTML = `
         <h4><i class="fas fa-check-circle" style="color: #28a745;"></i> 当前AI配置</h4>
         <p><strong>API URL:</strong> ${config.apiUrl}</p>
+        ${config.model ? `<p><strong>模型:</strong> ${config.model}</p>` : ''}
         <p><strong>最后验证:</strong> ${lastValidated}</p>
         <p style="color: #28a745; margin: 0;"><i class="fas fa-shield-alt"></i> 配置有效</p>
     `;
@@ -2633,6 +2820,17 @@ function updateCurrentConfigDisplay(config) {
 async function updateAIConfiguration() {
     const apiUrl = document.getElementById('configApiUrl').value.trim();
     const apiKey = document.getElementById('configApiKey').value.trim();
+    const modelSelect = document.getElementById('configModelSelect');
+    const modelInput = document.getElementById('configModel');
+    
+    // 获取模型名称
+    let model = '';
+    if (modelSelect.value === 'custom') {
+        model = modelInput.value.trim();
+    } else if (modelSelect.value) {
+        model = modelSelect.value;
+    }
+    
     const submitButton = document.querySelector('#aiConfigUpdateForm .btn-primary');
     const loading = submitButton.querySelector('.config-loading');
     const btnText = submitButton.querySelector('.config-btn-text');
@@ -2657,7 +2855,7 @@ async function updateAIConfiguration() {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${sessionToken}`
             },
-            body: JSON.stringify({ apiUrl, apiKey })
+            body: JSON.stringify({ apiUrl, apiKey, model })
         });
 
         const data = await response.json();
@@ -5804,6 +6002,18 @@ function showLocalSyncOptions() {
 }
 // 检查语言环境
 async function checkLanguageEnvironment() {
+    // 检查是否已经有面板存在
+    const existingPanel = document.querySelector('.language-environment-panel');
+    if (existingPanel) {
+        // 如果面板已存在，不再创建新的，只是闪烁提示
+        existingPanel.style.animation = 'pulse 0.5s ease-in-out';
+        setTimeout(() => {
+            existingPanel.style.animation = '';
+        }, 500);
+        showNotification('语言环境面板已打开', 'info');
+        return;
+    }
+
     try {
         showNotification('正在检查语言环境...', 'info');
         
@@ -5933,12 +6143,26 @@ function displayLanguageEnvironment(envData) {
             setTimeout(() => {
                 panel.parentNode.removeChild(panel);
                 delete window.closeLanguageEnvironmentPanel;
+                // 移除点击外部关闭的事件监听器
+                document.removeEventListener('click', outsideClickHandler);
             }, 200);
+        }
+    };
+    
+    // 点击外部关闭面板的事件处理器
+    const outsideClickHandler = function(event) {
+        if (!panel.contains(event.target)) {
+            window.closeLanguageEnvironmentPanel();
         }
     };
     
     // 添加到页面
     document.body.appendChild(panel);
+    
+    // 延迟添加点击外部关闭的监听器，避免立即触发
+    setTimeout(() => {
+        document.addEventListener('click', outsideClickHandler);
+    }, 100);
     
     // 入场动画
     requestAnimationFrame(() => {
@@ -6918,6 +7142,7 @@ async function sendChatMessage() {
     
     // 添加加载消息，包含取消按钮
     const loadingMessage = addChatMessage('ai', '正在思考中...', false);
+    loadingMessage.classList.add('loading');
     
     // 创建取消按钮
     const cancelBtn = document.createElement('button');
@@ -7653,6 +7878,15 @@ function addChatMessage(sender, content, isHTML = false) {
     
     if (isHTML) {
         messageElement.innerHTML = content;
+    } else if (sender === 'ai' && typeof marked !== 'undefined') {
+        // 对AI消息进行markdown渲染
+        try {
+            const markdownContent = marked.parse(content);
+            messageElement.innerHTML = markdownContent;
+        } catch (error) {
+            console.warn('Markdown渲染失败，使用原始文本:', error);
+            messageElement.textContent = content;
+        }
     } else {
         messageElement.textContent = content;
     }
@@ -7798,7 +8032,20 @@ function loadChatHistory(index) {
     history.messages.forEach(msg => {
         const messageElement = document.createElement('div');
         messageElement.className = `chat-message ${msg.sender}`;
-        messageElement.textContent = msg.content;
+        
+        // 对AI消息使用markdown渲染
+        if (msg.sender === 'ai' && typeof marked !== 'undefined') {
+            try {
+                const markdownContent = marked.parse(msg.content);
+                messageElement.innerHTML = markdownContent;
+            } catch (error) {
+                console.warn('Markdown渲染失败，使用原始文本:', error);
+                messageElement.textContent = msg.content;
+            }
+        } else {
+            messageElement.textContent = msg.content;
+        }
+        
         chatMessagesContainer.appendChild(messageElement);
     });
     

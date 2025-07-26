@@ -37,6 +37,9 @@ db.serialize(() => {
     db.run(`ALTER TABLE users ADD COLUMN ai_api_key TEXT`, (err) => {
         // 忽略错误，字段可能已存在
     });
+    db.run(`ALTER TABLE users ADD COLUMN ai_model TEXT`, (err) => {
+        // 忽略错误，字段可能已存在
+    });
     
     // 用户会话表 - 新增
     db.run(`CREATE TABLE IF NOT EXISTS user_sessions (
@@ -488,19 +491,20 @@ app.get('/api/ai-config/status', requireAuth, (req, res) => {
         console.log(`检查用户 ${userId} 的AI配置状态`);
         
         // 从数据库获取用户的AI配置
-        db.get("SELECT ai_api_url, ai_api_key FROM users WHERE id = ?", [userId], (err, user) => {
+        db.get("SELECT ai_api_url, ai_api_key, ai_model FROM users WHERE id = ?", [userId], (err, user) => {
             if (err) {
                 console.error('查询用户AI配置失败:', err);
                 return res.status(500).json({ error: '查询配置失败' });
             }
             
             const hasAiConfig = !!(user && user.ai_api_url && user.ai_api_key);
-            console.log(`用户 ${userId} AI配置状态: ${hasAiConfig}, URL: ${user?.ai_api_url}, Key存在: ${!!user?.ai_api_key}`);
+            console.log(`用户 ${userId} AI配置状态: ${hasAiConfig}, URL: ${user?.ai_api_url}, Key存在: ${!!user?.ai_api_key}, Model: ${user?.ai_model}`);
             
             res.json({
                 configured: hasAiConfig,
                 config: hasAiConfig ? {
                     apiUrl: user.ai_api_url,
+                    model: user.ai_model,
                     provider: identifyAIProvider(user.ai_api_url),
                     lastValidated: new Date().toISOString()
                 } : null
@@ -566,7 +570,7 @@ app.post('/api/ai-config', async (req, res) => {
 // 更新AI配置（用于修改密钥）
 app.put('/api/ai-config', requireAuth, async (req, res) => {
     try {
-        const { apiUrl, apiKey } = req.body;
+        const { apiUrl, apiKey, model } = req.body;
         const userId = req.user.id;
         
         if (!apiUrl || !apiKey) {
@@ -574,7 +578,7 @@ app.put('/api/ai-config', requireAuth, async (req, res) => {
         }
         
         // 验证新的API配置
-        const testResult = await testAIConnection(apiUrl, apiKey);
+        const testResult = await testAIConnection(apiUrl, apiKey, model);
         if (!testResult.success) {
             return res.status(400).json({ 
                 error: 'AI API配置验证失败', 
@@ -582,10 +586,10 @@ app.put('/api/ai-config', requireAuth, async (req, res) => {
             });
         }
         
-        // 更新数据库中的AI配置
+        // 更新数据库中的AI配置（添加模型字段）
         db.run(
-            "UPDATE users SET ai_api_url = ?, ai_api_key = ? WHERE id = ?",
-            [apiUrl.trim(), apiKey.trim(), userId],
+            "UPDATE users SET ai_api_url = ?, ai_api_key = ?, ai_model = ? WHERE id = ?",
+            [apiUrl.trim(), apiKey.trim(), model || null, userId],
             function(err) {
                 if (err) {
                     console.error('更新用户AI配置失败:', err);
@@ -597,12 +601,13 @@ app.put('/api/ai-config', requireAuth, async (req, res) => {
                     message: 'AI配置更新成功',
                     config: {
                         apiUrl: apiUrl,
+                        model: model,
                         provider: identifyAIProvider(apiUrl),
                         lastValidated: new Date().toISOString()
                     }
                 });
                 
-                console.log(`用户 ${req.user.username} AI配置已更新为 ${identifyAIProvider(apiUrl)}`);
+                console.log(`用户 ${req.user.username} AI配置已更新为 ${identifyAIProvider(apiUrl)} ${model ? `(模型: ${model})` : ''}`);
             }
         );
         
@@ -1982,9 +1987,18 @@ ${code}
 });
 
 // 测试AI连接
-async function testAIConnection(apiUrl, apiKey) {
+async function testAIConnection(apiUrl, apiKey, model = null) {
     try {
-        const modelName = getModelForProvider(apiUrl);
+        console.log(`开始测试AI连接: ${apiUrl}`);
+        
+        if (!apiUrl || !apiKey) {
+            console.log('API URL或API Key为空');
+            return { success: false, error: 'API URL和API Key都是必需的' };
+        }
+
+        const modelName = model || getModelForProvider(apiUrl);
+        console.log(`使用模型进行测试: ${modelName}`);
+        
         const response = await axios.post(apiUrl, {
             model: modelName,
             messages: [
@@ -1997,19 +2011,204 @@ async function testAIConnection(apiUrl, apiKey) {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${apiKey}`
             },
+            timeout: 15000, // 增加超时时间
+            validateStatus: function (status) {
+                // 只接受2xx状态码为成功
+                return status >= 200 && status < 300;
+            }
+        });
+        
+        console.log(`API响应状态: ${response.status}`);
+        console.log(`API响应数据存在: ${!!response.data}`);
+        
+        // 检查响应结构是否符合预期
+        if (response.data && 
+            response.data.choices && 
+            Array.isArray(response.data.choices) && 
+            response.data.choices.length > 0 &&
+            response.data.choices[0].message) {
+            console.log('AI连接测试成功');
+            return { success: true, message: 'API连接测试成功' };
+        } else {
+            console.log('API响应格式不正确:', response.data);
+            return { success: false, error: 'AI API响应格式不正确或无有效内容' };
+        }
+    } catch (error) {
+        console.log('AI连接测试失败:', error.message);
+        
+        // 详细的错误处理
+        if (error.response) {
+            // 服务器返回了错误状态码
+            const status = error.response.status;
+            const errorData = error.response.data;
+            
+            if (status === 401) {
+                return { success: false, error: 'API密钥无效或已过期' };
+            } else if (status === 403) {
+                return { success: false, error: 'API密钥权限不足' };
+            } else if (status === 404) {
+                return { success: false, error: 'API端点不存在，请检查URL是否正确' };
+            } else if (status === 429) {
+                return { success: false, error: 'API请求频率超限，请稍后重试' };
+            } else if (status >= 500) {
+                return { success: false, error: 'AI服务器内部错误，请稍后重试' };
+            } else {
+                const errorMsg = errorData?.error?.message || errorData?.message || '未知API错误';
+                return { success: false, error: `API错误 (${status}): ${errorMsg}` };
+            }
+        } else if (error.request) {
+            // 请求已发出但没有收到响应
+            return { success: false, error: '无法连接到API服务器，请检查网络连接和URL是否正确' };
+        } else if (error.code === 'ECONNABORTED') {
+            // 请求超时
+            return { success: false, error: '请求超时，请检查网络连接或稍后重试' };
+        } else {
+            // 其他错误
+            return { success: false, error: `连接测试失败: ${error.message}` };
+        }
+    }
+}
+
+// 检测可用模型
+async function detectAvailableModels(apiUrl, apiKey) {
+    try {
+        const provider = identifyAIProvider(apiUrl);
+        
+        // 根据不同的AI提供商使用不同的模型检测方式
+        switch (provider) {
+            case 'OpenAI':
+                return await detectOpenAIModels(apiUrl, apiKey);
+            case 'DeepSeek':
+                return await detectDeepSeekModels(apiUrl, apiKey);
+            case 'Claude':
+                return await detectClaudeModels(apiUrl, apiKey);
+            default:
+                // 对于自定义API，尝试通用检测方式
+                return await detectGenericModels(apiUrl, apiKey);
+        }
+    } catch (error) {
+        console.error('检测模型失败:', error);
+        return [];
+    }
+}
+
+// OpenAI模型检测
+async function detectOpenAIModels(apiUrl, apiKey) {
+    try {
+        const modelsUrl = apiUrl.replace('/chat/completions', '/models');
+        console.log('OpenAI模型检测URL:', modelsUrl);
+        
+        const response = await axios.get(modelsUrl, {
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json'
+            },
             timeout: 10000
         });
         
-        if (response.data && response.data.choices && response.data.choices[0]) {
-            return { success: true };
-        } else {
-            return { success: false, error: 'AI API响应格式不正确' };
+        console.log('OpenAI API响应状态:', response.status);
+        console.log('OpenAI API响应数据类型:', typeof response.data);
+        
+        if (response.data && response.data.data) {
+            const models = response.data.data
+                .filter(model => model.id.includes('gpt'))
+                .map(model => ({
+                    id: model.id,
+                    name: model.id,
+                    created: model.created
+                }));
+            console.log('OpenAI检测到的模型:', models);
+            return models;
         }
+        return [];
     } catch (error) {
-        return { 
-            success: false, 
-            error: error.response?.data?.error?.message || error.message || '连接失败'
-        };
+        console.error('OpenAI模型检测失败:', error.response?.status, error.response?.data);
+        // 如果API不支持模型列表，返回常见的OpenAI模型
+        return [
+            { id: 'gpt-4', name: 'GPT-4' },
+            { id: 'gpt-4-turbo', name: 'GPT-4 Turbo' },
+            { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo' }
+        ];
+    }
+}
+
+// DeepSeek模型检测
+async function detectDeepSeekModels(apiUrl, apiKey) {
+    try {
+        const modelsUrl = apiUrl.replace('/chat/completions', '/models');
+        console.log('DeepSeek模型检测URL:', modelsUrl);
+        
+        const response = await axios.get(modelsUrl, {
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json'
+            },
+            timeout: 10000
+        });
+        
+        console.log('DeepSeek API响应状态:', response.status);
+        
+        if (response.data && response.data.data) {
+            return response.data.data.map(model => ({
+                id: model.id,
+                name: model.id
+            }));
+        }
+        return [];
+    } catch (error) {
+        console.error('DeepSeek模型检测失败:', error.response?.status, error.response?.data);
+        // 如果API不支持模型列表，返回常见的DeepSeek模型
+        return [
+            { id: 'deepseek-chat', name: 'DeepSeek Chat' },
+            { id: 'deepseek-coder', name: 'DeepSeek Coder' }
+        ];
+    }
+}
+
+// Claude模型检测
+async function detectClaudeModels(apiUrl, apiKey) {
+    // Claude API通常不提供模型列表端点，返回已知模型
+    console.log('Claude模型检测: 使用预设模型列表');
+    return [
+        { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus' },
+        { id: 'claude-3-sonnet-20240229', name: 'Claude 3 Sonnet' },
+        { id: 'claude-3-haiku-20240307', name: 'Claude 3 Haiku' }
+    ];
+}
+
+// 通用模型检测
+async function detectGenericModels(apiUrl, apiKey) {
+    try {
+        const modelsUrl = apiUrl.replace('/chat/completions', '/models');
+        console.log('通用模型检测URL:', modelsUrl);
+        
+        const response = await axios.get(modelsUrl, {
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json'
+            },
+            timeout: 10000,
+            validateStatus: function (status) {
+                return status >= 200 && status < 500; // 接受所有2xx-4xx状态码
+            }
+        });
+        
+        console.log('通用API响应状态:', response.status);
+        console.log('通用API响应Content-Type:', response.headers['content-type']);
+        
+        // 检查响应是否为JSON
+        if (response.headers['content-type']?.includes('application/json') && response.data && response.data.data) {
+            return response.data.data.map(model => ({
+                id: model.id || model.name,
+                name: model.id || model.name
+            }));
+        }
+        
+        console.log('通用API不支持模型列表或返回非JSON格式');
+        return [];
+    } catch (error) {
+        console.error('通用模型检测失败:', error.message);
+        return [];
     }
 }
 
